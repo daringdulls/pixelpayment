@@ -1275,3 +1275,16 @@ td .primary-text, .list-row strong { font-weight: 600; }
 .guest-pick .search { min-width: 0; }
 @media (max-width: 860px) { .bill-summary { order: 1; } }
 .bill-layout .bb-totals .grand { display: none; }
+
+/* =====================================================================
+ * Sign-in · liquid "one bill" animation
+ * ===================================================================== */
+.liquid-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 240px; position: relative; z-index: 1; }
+.liquid { width: min(440px, 100%); height: auto; overflow: visible; filter: drop-shadow(0 24px 40px rgba(4, 22, 28, .55)); }
+.liquid-caption { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: rgba(191, 240, 230, .6); text-align: center; }
+.auth-hero { margin-top: 0; }
+@keyframes auth-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.auth-card { animation: auth-in .55s cubic-bezier(.22, 1, .36, 1) both; }
+.auth-hero { animation: auth-in .7s .1s cubic-bezier(.22, 1, .36, 1) both; }
+@media (max-height: 760px) { .liquid-wrap { min-height: 170px; } .liquid { width: min(320px, 100%); } }
+@media (prefers-reduced-motion: reduce) { .auth-card, .auth-hero { animation: none; } }

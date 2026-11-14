@@ -223,6 +223,29 @@
       <div class="auth">
         <aside class="auth-aside">
           <div class="brand-row"><span class="mark">${icon('logo')}</span><div class="wordmark">Pixel Payment<small>Cozy Hospitality</small></div></div>
+          <div class="liquid-wrap" aria-hidden="true">
+            <svg class="liquid" viewBox="0 0 400 260">
+              <defs>
+                <filter id="lqGoo" x="-20%" y="-40%" width="140%" height="180%">
+                  <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur"/>
+                  <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -8" result="goo"/>
+                  <feComposite in="SourceGraphic" in2="goo" operator="atop"/>
+                </filter>
+                <linearGradient id="lqFill" gradientUnits="userSpaceOnUse" x1="80" y1="60" x2="320" y2="210">
+                  <stop offset="0" stop-color="#BFF0E6"/><stop offset=".55" stop-color="#5FC1B0"/><stop offset="1" stop-color="#13807A"/>
+                </linearGradient>
+              </defs>
+              <g filter="url(#lqGoo)" fill="url(#lqFill)">
+                <circle id="lqA" cx="200" cy="130" r="54"/>
+                <circle id="lqB" cx="200" cy="130" r="54"/>
+                <path id="lqBridge" d=""/>
+                <circle class="lq-drop" cx="200" cy="130" r="0"/>
+                <circle class="lq-drop" cx="200" cy="130" r="0"/>
+                <circle class="lq-drop" cx="200" cy="130" r="0"/>
+              </g>
+            </svg>
+            <p class="liquid-caption">Charges split across outlets · settled as one bill</p>
+          </div>
           <div class="auth-hero">
             <div class="kicker">Staff workspace</div>
             <h1>Every guest.<br>One bill.</h1>
@@ -291,6 +314,78 @@
       }
     };
     form.querySelector('input').focus();
+    startLiquid();
+  }
+
+  /* Liquid split, adapted from a spring sketch: one blob is pulled into two halves joined by a
+   * liquid bridge; the bridge's waist thins, tears at zero and throws off three drops; then the
+   * halves spring back into one. Spring k 55 / damping 11 (slightly under-damped), NECK 0.34, PULL 26. */
+  let liquidRaf = 0;
+  function startLiquid() {
+    cancelAnimationFrame(liquidRaf);
+    const svg = document.querySelector('.liquid');
+    if (!svg || !svg.getClientRects().length) return;
+    const spring = { k: 55, damping: 11 };
+    const NECK = 0.34, PULL = 26;
+    const CX = 200, CY = 130, SPREAD = 112, R = 54, TEAR_AT = 0.72;
+    const A = svg.querySelector('#lqA'), B = svg.querySelector('#lqB'), bridgeEl = svg.querySelector('#lqBridge');
+    const dropEls = [...svg.querySelectorAll('.lq-drop')];
+    const set = (el, attrs) => { for (const k in attrs) el.setAttribute(k, attrs[k].toFixed ? attrs[k].toFixed(2) : attrs[k]); };
+
+    // halves(g): the two blobs move apart and thin a little as they separate.
+    let hr = R;
+    const halves = (g) => {
+      const vis = Math.max(0, Math.min(1.15, g));
+      const r = R - 9 * Math.min(vis, 1), dx = SPREAD * vis;
+      hr = r;
+      set(A, { cx: CX - dx, cy: CY, r });
+      set(B, { cx: CX + dx, cy: CY, r });
+      return dx;
+    };
+    // bridge(g): the liquid neck between the halves; returns its waist (0 = torn).
+    // Hourglass neck: full height where it meets each half, pinched to the waist in the middle.
+    const bridge = (g, dx) => {
+      const waist = NECK * (1 - Math.max(0, g) / TEAR_AT);
+      if (waist <= 0 || dx < 1) { bridgeEl.setAttribute('d', ''); return waist; }
+      const h = hr * 0.78, w = Math.max(2.5, R * waist * 1.5);
+      const ax = CX - dx, bx = CX + dx;
+      bridgeEl.setAttribute('d', `M${ax},${CY - h} C${CX - dx * 0.35},${CY - h} ${CX - dx * 0.25},${CY - w} ${CX},${CY - w} `
+        + `C${CX + dx * 0.25},${CY - w} ${CX + dx * 0.35},${CY - h} ${bx},${CY - h} L${bx},${CY + h} `
+        + `C${CX + dx * 0.35},${CY + h} ${CX + dx * 0.25},${CY + w} ${CX},${CY + w} `
+        + `C${CX - dx * 0.25},${CY + w} ${CX - dx * 0.35},${CY + h} ${ax},${CY + h} Z`);
+      return waist;
+    };
+    if (reducedMotion()) { bridge(0, halves(0)); return; }
+
+    let g = 0, v = 0, target = 0, phase = 0, torn = false, last = performance.now();
+    const drops = dropEls.map((el) => ({ el, life: 0 }));
+    // drops(n): throw off n droplets from the point where the neck tore.
+    const throwDrops = (n) => {
+      const kick = [[-62, -60, 12], [4, -120, 11], [58, -48, 10]];
+      drops.slice(0, n).forEach((d, i) => { Object.assign(d, { x: CX, y: CY, vx: kick[i][0], vy: kick[i][1], r: kick[i][2], life: 1.5 }); });
+    };
+
+    const tick = (now) => {
+      if (!svg.isConnected) return;
+      const dt = Math.min(1 / 30, (now - last) / 1000);
+      last = now;
+      phase += dt;
+      if (target === 0 && phase > 2.3) { target = 1; v += PULL / 10; phase = 0; }        // pull apart
+      else if (target === 1 && phase > 2.4) { target = 0; phase = 0; }                    // flow back into one
+      // springAt(t): damped spring toward the target, 0..1
+      const a = -spring.k * (g - target) - spring.damping * v;
+      v += a * dt; g += v * dt;
+      const waist = bridge(g, halves(g));
+      if (waist <= 0 && !torn) { torn = true; throwDrops(3); }
+      if (g < 0.3) torn = false;
+      drops.forEach((d) => {
+        if (d.life <= 0) { d.el.setAttribute('r', '0'); return; }
+        d.life -= dt; d.vy += 150 * dt; d.x += d.vx * dt; d.y += d.vy * dt;
+        set(d.el, { cx: d.x, cy: d.y, r: d.r * Math.max(0, Math.min(1, d.life / 0.9)) });
+      });
+      liquidRaf = requestAnimationFrame(tick);
+    };
+    liquidRaf = requestAnimationFrame(tick);
   }
 
   async function signOut() {
