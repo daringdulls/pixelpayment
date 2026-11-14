@@ -52,6 +52,8 @@
     link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
     userPlus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/>',
     mapPin: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
     hash: '<path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="M16 3l-2 18"/>',
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -86,6 +88,19 @@
   let data = null;          // current workspace snapshot (live or demo)
   let liveData = null;      // last live snapshot
   let demo = false;
+  let demoFull = null;      // full demo dataset (head office view)
+  let demoRole = 'admin';   // demo: 'admin' or 'outlet'
+  let usernameDomain = 'pixelpayment.local';
+
+  // Username logins are stored as <username>@<usernameDomain> in Supabase Auth.
+  const isUsernameLogin = (email) => String(email || '').toLowerCase().endsWith('@' + usernameDomain);
+  const loginName = (email) => (isUsernameLogin(email) ? String(email).split('@')[0] : String(email || ''));
+  const toLoginEmail = (v) => { v = String(v || '').trim(); return v.includes('@') ? v : v.toLowerCase() + '@' + usernameDomain; };
+  function genPassword(len = 16) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%*-_';
+    const bytes = crypto.getRandomValues(new Uint32Array(len));
+    return Array.from(bytes, (b) => chars[b % chars.length]).join('');
+  }
   const ui = {
     page: 'Guests',
     search: '',
@@ -155,6 +170,7 @@
       const res = await nativeFetch('/api/config');
       const cfg = await res.json();
       if (!res.ok) throw new Error(cfg.error || 'Unable to load configuration.');
+      if (cfg.usernameDomain) usernameDomain = cfg.usernameDomain;
       sb = window.supabase.createClient(cfg.url, cfg.key, { global: { fetch: nativeFetch } });
       const { data: { session } } = await sb.auth.getSession();
       session ? await load() : renderAuth();
@@ -193,11 +209,13 @@
             </div>
             ${notice ? `<div class="alert ${tone}" style="margin-bottom:16px">${icon(tone === 'success' ? 'checkCircle' : 'info', 'sm')}<span>${esc(notice)}</span></div>` : ''}
             <form id="authForm" novalidate>
-              <label class="field"><span>Work email</span><input name="email" type="email" autocomplete="username" placeholder="name@company.com" required></label>
+              ${signup
+                ? '<label class="field"><span>Work email</span><input name="email" type="email" autocomplete="username" placeholder="name@company.com" required></label>'
+                : '<label class="field"><span>Username or email</span><input name="email" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="e.g. deck.cashier or name@company.com" required></label>'}
               <label class="field"><span>Password ${signup ? '<span class="hint">· at least 12 characters</span>' : ''}</span><input name="password" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" ${signup ? 'minlength="12"' : ''} required></label>
               <div id="authError" class="form-error" role="alert"></div>
               <button type="submit" class="btn primary lg block">${signup ? 'Create account' : 'Sign in'}</button>
-              <p class="auth-help">${signup ? 'After confirming your email, an administrator must assign you a role before you can access the workspace.' : 'Access is managed by your head office administrator.'}</p>
+              <p class="auth-help">${signup ? 'After confirming your email, an administrator must assign you a role before you can access the workspace.' : 'Use the username or email your head office administrator set up for you.'}</p>
             </form>
             <div class="divider">or</div>
             <button class="btn block" data-act="demo">${icon('eye', 'sm')} Explore the interactive demo</button>
@@ -217,6 +235,7 @@
         if (signup && values.password.length < 12) throw new Error('Use at least 12 characters for a new password.');
         if (!sb) throw new Error('Database setup is not complete yet.');
         btn.disabled = true;
+        if (!signup) values.email = toLoginEmail(values.email);
         const { data: res, error } = signup
           ? await sb.auth.signUp({ email: values.email, password: values.password, options: { emailRedirectTo: location.origin } })
           : await sb.auth.signInWithPassword(values);
@@ -292,7 +311,8 @@
   function render() {
     document.body.classList.add('signed-in');
     const pending = data.bills.filter((b) => b.status === 'pending').length;
-    const who = isAdmin() ? 'Head office' : 'Outlet staff';
+    const myOutlet = !isAdmin() && data.outlets.find((o) => o.id === data.member?.outlet_id);
+    const who = isAdmin() ? 'Head office' : myOutlet ? myOutlet.name + ' staff' : 'Outlet staff';
     const nav = NAV.filter((g) => !g.admin || isAdmin()).map((g) => `
       <div class="nav-group">
         <div class="nav-label">${g.group}</div>
@@ -310,8 +330,8 @@
           <nav aria-label="Main">${nav}</nav>
           <div class="sidebar-foot">
             <div class="user-chip">
-              <span class="avatar">${esc(initials(data.email))}</span>
-              <div class="meta"><strong>${who}</strong><small title="${esc(data.email)}">${esc(data.email)}</small></div>
+              <span class="avatar">${esc(initials(loginName(data.email)))}</span>
+              <div class="meta"><strong>${who}</strong><small title="${esc(data.email)}">${esc(loginName(data.email))}</small></div>
               <button class="btn ghost icon sm" data-act="signout" title="Sign out" aria-label="Sign out">${icon('logout', 'sm')}</button>
             </div>
           </div>
@@ -330,7 +350,8 @@
           </header>
           <main class="content" id="content">
             ${pageHeader()}
-            ${demo ? banner('demo', 'eye', 'You are viewing a demo workspace', 'Sample guests, invoices and payments. Changes are disabled.', `<button class="btn sm" data-act="demo">Exit demo</button>`) : ''}
+            ${demo ? banner('demo', 'eye', demoRole === 'admin' ? 'Demo · viewing as head office' : 'Demo · viewing as outlet staff (Cozy Deck)', 'Switch roles to see what each user sees. Changes are disabled in the demo.',
+              `<div class="chips" role="group" aria-label="View demo as"><button class="chip" aria-pressed="${demoRole === 'admin'}" data-act="demo-role" data-arg="admin">Head office</button><button class="chip" aria-pressed="${demoRole === 'outlet'}" data-act="demo-role" data-arg="outlet">Outlet staff</button></div><button class="btn sm" data-act="demo">Exit demo</button>`) : ''}
             ${!demo && !data.outlets.length ? banner('', 'building', 'Your workspace is ready', 'Add your first outlet to begin posting daily invoices.', isAdmin() ? `<button class="btn sm primary" data-act="form" data-arg="outlet">${icon('plus', 'sm')} Add outlet</button>` : '') : ''}
             ${pageBody()}
             <footer class="footer"><span>© ${new Date().getFullYear()} ${esc(data.settings.company)} · Powered by Pixel Payment</span><span>All amounts in ${esc(currency())} · Times shown in Maldives time</span></footer>
@@ -400,7 +421,7 @@
         ${kpi('Guests in house', active.length, 'bed', `${all.length} stays registered`, '', false)}
         ${kpi('Open guest balances', openBalance, 'payments', `${guestBills.filter((b) => outstanding(b) > 0).length} unpaid charges`, 'blue')}
         ${kpi('Guest charges', guestBills.length, 'invoices', isAdmin() ? 'Across all outlets' : 'From your outlet', '', false)}
-        ${kpi('Awaiting review', pending, 'clock', pending ? 'Approve before settlement' : 'Nothing pending', pending ? 'amber' : '', false)}
+        ${kpi('Awaiting review', pending, 'clock', pending ? (isAdmin() ? 'Approve before settlement' : 'Waiting for head office review') : 'Nothing pending', pending ? 'amber' : '', false)}
       </div>
       ${!isAdmin() ? banner('', 'info', 'Outlet view', 'You see charges from your assigned outlet only. The front office sees the complete guest bill.') : ''}
       <section class="card">
@@ -484,7 +505,7 @@
       <section class="card" id="guestFolio">
         <div class="folio-head">
           <div>
-            <div class="eyebrow">${esc(data.settings.company)} · ${pending ? 'Provisional statement' : 'Consolidated guest bill'}</div>
+            <div class="eyebrow">${esc(data.settings.company)} · ${!isAdmin() ? esc(data.outlets[0]?.name || 'Outlet') + ' charges' : pending ? 'Provisional statement' : 'Consolidated guest bill'}</div>
             <h2>${esc(s.guest_name)}</h2>
             <div class="folio-meta">
               <span>${icon('building', 'sm')} ${esc(s.property)}</span>
@@ -773,13 +794,14 @@
         </form>
       </section>
       <section class="card">
-        <div class="card-head"><div><h2>Staff access</h2><p>Head office sees everything; outlet staff see their outlet only.</p></div><button class="btn sm" data-act="form" data-arg="member">${icon('userPlus', 'sm')} Assign</button></div>
+        <div class="card-head"><div><h2>Staff &amp; logins</h2><p>Head office sees everything; outlet staff see only their outlet.</p></div><button class="btn sm primary" data-act="form" data-arg="user">${icon('userPlus', 'sm')} Add user</button></div>
         ${data.members.map((m) => `<div class="list-row">
-          <span class="avatar">${esc(initials(m.email))}</span>
-          <div class="grow"><strong>${esc(m.email)}</strong><small>${m.role === 'admin' ? 'Head office administrator' : esc(outletName(m.outlet_id))}</small></div>
+          <span class="avatar">${esc(initials(loginName(m.email)))}</span>
+          <div class="grow"><strong>${esc(loginName(m.email))}</strong><small>${isUsernameLogin(m.email) ? 'Username login' : 'Email login'} · ${m.role === 'admin' ? 'All outlets' : esc(outletName(m.outlet_id))}</small></div>
           <span class="badge ${m.role === 'admin' ? 'info' : 'neutral'}">${m.role === 'admin' ? 'Admin' : 'Outlet'}</span>
+          <button class="btn ghost icon sm" data-act="form" data-arg="reset" data-arg2="${esc(m.email)}" title="Reset password" aria-label="Reset password for ${esc(loginName(m.email))}">${icon('key', 'sm')}</button>
         </div>`).join('')}
-        <div class="folio-note">Staff create an account with the assigned email and confirm it before signing in.</div>
+        <div class="folio-note">Username logins work immediately. Email users create their own account with the assigned email and confirm it before signing in.</div>
       </section>
     </div>`;
   }
@@ -829,6 +851,10 @@
     `<label class="field ${cls}"><span>${label}</span><input name="${name}" type="${type}" value="${esc(value)}" ${attrs} required></label>`;
   const moneyField = (label, value = '', attrs = '', cls = '') =>
     `<label class="field ${cls}"><span>${label}</span><div class="input-affix"><span class="affix">${esc(currency())}</span><input name="amount" type="number" inputmode="decimal" value="${esc(value)}" min="0.01" step="0.01" ${attrs} required></div></label>`;
+  const passwordField = (label, cls = 'wide') => `<label class="field ${cls}"><span>${label} <span class="hint">· 12+ characters</span></span>
+    <div class="pw-row"><input name="password" type="text" minlength="12" maxlength="72" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Type or generate">
+    <button type="button" class="btn" data-act="gen-pass">${icon('refresh', 'sm')} Generate</button>
+    <button type="button" class="btn icon" data-act="copy-pass" title="Copy password" aria-label="Copy password">${icon('copy', 'sm')}</button></div></label>`;
   const methodField = () => `<label class="field"><span>Payment method</span><select name="method">${METHODS.map((m) => `<option>${m}</option>`).join('')}</select></label>`;
   const outletOptions = () => data.outlets.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
   const stayOptions = (q = '') => stays().filter((s) => s.status === 'active' && stayLabel(s).toLowerCase().includes(q.toLowerCase()))
@@ -836,7 +862,6 @@
   const footer = (label) => `<button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary">${label}</button>`;
 
   function openForm(kind, arg) {
-    if (!requireLive()) return;
 
     if (kind === 'bill' && !data.outlets.length) {
       if (isAdmin()) { toast('Add your first outlet before posting invoices.'); return openForm('outlet'); }
@@ -884,13 +909,34 @@
         </div>`, footer('Submit invoice'), 'bills');
     }
 
-    if (kind === 'member') {
-      return modal('Assign staff access', 'They must sign up with this email and confirm it.',
-        `<div class="form-grid">
-          ${field('Email address', 'email', 'email', '', 'placeholder="name@company.com"', 'wide')}
-          <label class="field"><span>Role</span><select name="role"><option value="outlet">Outlet staff</option><option value="admin">Head office administrator</option></select></label>
-          <label class="field"><span>Outlet <span class="hint">· outlet staff only</span></span><select name="outlet_id">${outletOptions()}</select></label>
-        </div>`, footer('Assign access'), 'members');
+    if (kind === 'user') {
+      const mode = arg || 'login';
+      const tabs = `<div class="auth-tabs" role="tablist" style="margin:0">
+        <button type="button" role="tab" aria-selected="${mode === 'login'}" data-act="form" data-arg="user" data-arg2="login">Username &amp; password</button>
+        <button type="button" role="tab" aria-selected="${mode === 'invite'}" data-act="form" data-arg="user" data-arg2="invite">Invite by email</button></div>`;
+      const roleFields = `<label class="field"><span>Role</span><select name="role" data-change="role"><option value="outlet">Outlet staff</option><option value="admin">Head office administrator</option></select></label>
+        <label class="field" data-outlet-field><span>Outlet</span><select name="outlet_id">${outletOptions()}</select></label>`;
+      if (mode === 'login') {
+        return modal('Add user', 'Create a login and hand the username and password to the staff member.',
+          `${tabs}<div class="form-grid">
+            <label class="field wide"><span>Username <span class="hint">· letters, numbers, dots, dashes</span></span><input name="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9._\\-]{2,31}" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e.g. deck.cashier"></label>
+            ${passwordField('Password')}
+            ${roleFields}
+          </div>
+          <div class="alert info">${icon('info', 'sm')}<span>They sign in with this username and password straight away. No email address needed.</span></div>`,
+          footer('Create user'), 'staff-create');
+      }
+      return modal('Add user', 'The staff member sets their own password.',
+        `${tabs}<div class="form-grid">${field('Email address', 'email', 'email', '', 'placeholder="name@company.com"', 'wide')}${roleFields}</div>
+        <div class="alert info">${icon('info', 'sm')}<span>They choose <b>Create account</b> on the sign-in page with this email, then confirm it from their inbox.</span></div>`,
+        footer('Add user'), 'members');
+    }
+
+    if (kind === 'reset') {
+      return modal('Reset password', `Set a new password for <b>${esc(loginName(arg))}</b>.`,
+        `<input type="hidden" name="email" value="${esc(arg)}">${passwordField('New password')}
+        <p class="kpi-foot">Share the new password with them directly. Their old password stops working immediately.</p>`,
+        footer('Set password'), 'staff-reset');
     }
 
     if (kind === 'payment') {
@@ -952,7 +998,7 @@
       await post(name, values);
       if (name !== 'settings') closeOverlay();
       await load();
-      toast(name === 'settings' ? 'Settings saved.' : 'Saved to your workspace.');
+      toast({ settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', members: 'User added. They can now create their account.' }[name] || 'Saved to your workspace.');
     } catch (err) {
       errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
       btn.disabled = false;
@@ -1095,7 +1141,7 @@
       pay('p4', 'b6', 120000, d(-1), 'Bank transfer', 'TRF-55821'),
     ];
     const ago = (m) => new Date(Date.now() - m * 60000).toISOString();
-    data = {
+    demoFull = {
       member: { role: 'admin' },
       email: 'demo@pixelpayment.app',
       settings: { company: 'Cozy Hospitality', currency: 'MVR' },
@@ -1109,11 +1155,34 @@
       ],
       members: [
         { email: 'demo@pixelpayment.app', role: 'admin' },
-        { email: 'deck@cozy.example', role: 'outlet', outlet_id: 'd2' },
+        { email: 'deck.cashier@' + usernameDomain, role: 'outlet', outlet_id: 'd2' },
         { email: 'scuba@cozy.example', role: 'outlet', outlet_id: 'd3' },
       ],
     };
-    ui.page = 'Guests';
+    demoRole = 'admin';
+    applyDemoRole();
+  }
+
+  // Demo only: mimic what the backend returns for an outlet staff member (Cozy Deck).
+  function applyDemoRole() {
+    if (demoRole === 'admin') {
+      data = demoFull;
+    } else {
+      const outletId = 'd2';
+      const bills = demoFull.bills.filter((b) => b.outlet_id === outletId);
+      const ids = new Set(bills.map((b) => b.id));
+      data = {
+        ...demoFull,
+        member: { role: 'outlet', outlet_id: outletId },
+        email: 'deck.cashier@' + usernameDomain,
+        outlets: demoFull.outlets.filter((o) => o.id === outletId),
+        bills,
+        payments: demoFull.payments.filter((p) => ids.has(p.bill_id)),
+        activity: demoFull.activity.filter((a) => /Cozy Deck|CD-/.test(a.entity)),
+        members: [],
+      };
+    }
+    if (ui.page === 'Settings' && demoRole !== 'admin') ui.page = 'Guests';
     ui.selectedStay = null;
     render();
   }
@@ -1146,6 +1215,13 @@
     signout: signOut,
     refresh: async () => { await load(); toast('Workspace refreshed.'); },
     demo: toggleDemo,
+    'demo-role': (r) => { demoRole = r; closeOverlay(); applyDemoRole(); },
+    'gen-pass': (_, el) => { const input = el.closest('.pw-row').querySelector('input'); input.value = genPassword(); input.focus(); input.select(); },
+    'copy-pass': async (_, el) => {
+      const input = el.closest('.pw-row').querySelector('input');
+      if (!input.value) return toast('Generate or type a password first.');
+      try { await navigator.clipboard.writeText(input.value); toast('Password copied.'); } catch { input.select(); toast('Press Ctrl+C to copy.'); }
+    },
     export: exportCsv,
     close: closeOverlay,
     form: (arg, el) => openForm(arg, el.dataset.arg2),
@@ -1183,6 +1259,10 @@
 
   document.addEventListener('change', (e) => {
     if (e.target.dataset.change === 'outletFilter') { ui.outletFilter = e.target.value; updateInvoiceRows(); }
+    if (e.target.dataset.change === 'role') {
+      const f = e.target.closest('form').querySelector('[data-outlet-field]');
+      if (f) f.hidden = e.target.value === 'admin';
+    }
   });
 
   document.addEventListener('submit', (e) => {

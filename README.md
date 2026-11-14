@@ -19,6 +19,8 @@ Live: https://cozy-guest-ledger.vercel.app
 |---|---|
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_PUBLISHABLE_KEY` | Supabase anon/publishable key (served to the browser via `/api/config`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Server only.** Lets head office create username logins and reset passwords (`api/_staff.js`). Never exposed to the browser. |
+| `STAFF_USERNAME_DOMAIN` | Optional. Username logins are stored as `<username>@<domain>` in Supabase Auth. Default `pixelpayment.local`. |
 
 ## Develop
 ```bash
@@ -26,5 +28,12 @@ npm install
 npm run build   # outputs dist/
 ```
 
+## Staff logins
+Head office can add users in **Settings → Staff & logins → Add user**:
+- **Username & password**: creates a confirmed login right away (requires `SUPABASE_SERVICE_ROLE_KEY`). Staff sign in with the username.
+- **Invite by email**: the staff member creates their own account with that email and confirms it.
+
+The key icon on each user resets their password. The server only allows this for administrators and only for members of this workspace.
+
 ## API used by the frontend
-`GET /api/config`, `GET /api/data`, `POST /api/{stays|outlets|bills|members|payments|settle|settings|approve|approve-stay|checkout|link-bill}`
+`GET /api/config`, `GET /api/data`, `POST /api/{staff-create|staff-reset|stays|outlets|bills|members|payments|settle|settings|approve|approve-stay|checkout|link-bill}`
