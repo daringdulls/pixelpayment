@@ -49,5 +49,12 @@ choose items from the dropdown, set quantities, add a discount % or a custom ite
 **One-time setup:** run `supabase/migrations/20261114120000_pixel_rate_cards.sql` in the Supabase SQL editor.
 It creates `public.pixel_rate_cards` with RLS on and no public access; only the Vercel API (secret key) reads and writes it.
 
+## Branding
+Head office sets the logo, brand colour, registered name, address, contacts, tax number, payment details and terms in
+**Settings → Branding**. They are printed on guest folios (statement with running balance, totals, payment details and
+signature lines) and on invoices.
+
+**One-time setup:** run `supabase/migrations/20261114180000_pixel_branding.sql` in the Supabase SQL editor.
+
 ## API used by the frontend
-`GET /api/config`, `GET /api/data`, `GET /api/rates`, `POST /api/{rates-save|staff-create|staff-reset|stays|outlets|bills|members|payments|settle|settings|approve|approve-stay|checkout|link-bill}`
+`GET /api/config`, `GET /api/data`, `GET /api/rates`, `GET /api/branding`, `POST /api/{branding-save|rates-save|staff-create|staff-reset|stays|outlets|bills|members|payments|settle|settings|approve|approve-stay|checkout|link-bill}`

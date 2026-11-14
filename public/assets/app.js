@@ -94,6 +94,19 @@
   let usernameDomain = 'pixelpayment.local';
   let rateCards = {};       // outlet_id -> { currency, fx_rate, items: [{ id, category, name, price }] }
   let rateError = '';
+  let brand = {};           // workspace branding: logo, color, legal_name, address, phone, email, website, tax_id, payment_info, terms, tagline
+  let brandError = '';
+  const brandColor = () => (/^#[0-9a-f]{6}$/i.test(brand.color || '') ? brand.color : '#0e6b55');
+  function inkOn(hex) {
+    const n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.6 ? '#0f1a24' : '#ffffff';
+  }
+  const legalName = () => brand.legal_name || data.settings.company;
+  const docStyle = () => `style="--doc-accent:${brandColor()};--doc-on-accent:${inkOn(brandColor())}"`;
+  const brandContacts = () => [brand.phone, brand.email, brand.website].filter(Boolean).map(esc).join(' · ');
+  const brandMark = (cls = '') => (brand.logo
+    ? `<img class="brand-logo ${cls}" src="${esc(brand.logo)}" alt="${esc(legalName())}">`
+    : `<div class="brand-mark ${cls}">${esc(initials(legalName()))}</div>`);
 
   // Username logins are stored as <username>@<usernameDomain> in Supabase Auth.
   const isUsernameLogin = (email) => String(email || '').toLowerCase().endsWith('@' + usernameDomain);
@@ -280,6 +293,20 @@
     return { ...d, bills, payments: (d.payments || []).filter((p) => ids.has(p.bill_id)), outlets: (d.outlets || []).filter((o) => o.id === m.outlet_id) };
   }
 
+  async function loadBranding() {
+    if (demo) return;
+    try {
+      const res = await fetch('/api/branding');
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Branding is unavailable.');
+      brand = body.brand || {};
+      brandError = '';
+    } catch (err) {
+      brandError = err.message;
+    }
+    if (!demo && data && !document.querySelector('#modal [role=dialog]')) render();
+  }
+
   async function loadRates() {
     if (demo) return;
     try {
@@ -304,6 +331,7 @@
       if (!demo) data = liveData;
       render();
       loadRates();
+      loadBranding();
     } catch (err) {
       if (err.status === 401) return renderAuth();
       root().innerHTML = `
@@ -557,57 +585,71 @@
       <div id="guestActionError" class="form-error" style="margin-bottom:12px"></div>
       ${!isAdmin() ? banner('', 'info', 'Outlet view', 'Only your outlet’s charges and collections are shown on this folio.') : ''}
       ${pending ? banner('warn', 'clock', `${pending} charge${pending > 1 ? 's' : ''} awaiting review`, 'Pending charges are included in the total. Approve them before collecting a consolidated payment.', isAdmin() ? `<button class="btn sm" data-act="approve-stay" data-arg="${esc(id)}">${icon('check', 'sm')} Approve all</button>` : '') : ''}
-      <section class="card" id="guestFolio">
-        <div class="folio-head">
-          <div>
-            <div class="eyebrow">${esc(data.settings.company)} · ${!isAdmin() ? esc(data.outlets[0]?.name || 'Outlet') + ' charges' : pending ? 'Provisional statement' : 'Consolidated guest bill'}</div>
-            <h2>${esc(s.guest_name)}</h2>
-            <div class="folio-meta">
-              <span>${icon('building', 'sm')} ${esc(s.property)}</span>
-              <span>${icon('bed', 'sm')} Room ${esc(s.room)}</span>
-              <span>${icon('calendar', 'sm')} ${fmtDate(s.arrival)} – ${fmtDate(s.departure)}</span>
-              <span>${icon('hash', 'sm')} <span class="mono">${esc(String(s.id).slice(0, 8).toUpperCase())}</span></span>
+      ${folioStatement(s, bills, receipts, byOutlet, { total, paid, balance, pending, settled })}`;
+  }
+
+  function folioStatement(s, bills, receipts, byOutlet, { total, paid, balance, pending, settled }) {
+    const tx = [
+      ...bills.map((b) => ({ date: b.date, ref: b.number, desc: billSummary(b) || 'Outlet charges', outlet: outletName(b.outlet_id), charge: b.amount, credit: 0, id: b.id, pending: b.status === 'pending' })),
+      ...[...receipts.values()].map((r) => ({ date: r.date, ref: r.reference, desc: 'Payment received · ' + r.method, outlet: 'Front office', charge: 0, credit: r.amount })),
+    ].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (b.charge - a.charge));
+    let run = 0;
+    tx.forEach((t) => { run += t.charge - t.credit; t.balance = run; });
+    const n = nights(s.arrival, s.departure);
+    const title = !isAdmin() ? 'Outlet statement' : pending ? 'Provisional folio' : 'Guest folio';
+    return `
+      <article class="statement-doc" id="guestFolio" ${docStyle()}>
+        <header class="st-head">
+          <div class="st-brand">${brandMark()}
+            <div>
+              <h2>${esc(legalName())}</h2>
+              ${brand.tagline ? `<p class="st-tagline">${esc(brand.tagline)}</p>` : ''}
+              ${brand.address ? `<p>${esc(brand.address).replace(/\n/g, '<br>')}</p>` : ''}
+              ${brandContacts() ? `<p>${brandContacts()}</p>` : ''}
+              ${brand.tax_id ? `<p>Reg. / Tax no. ${esc(brand.tax_id)}</p>` : ''}
             </div>
           </div>
-          <div class="folio-balance">
-            <small>Balance due</small>
-            <div class="amt">${esc(currency())} ${money(balance)}</div>
-            ${settled ? '<span class="badge paid">Settled</span>' : s.status === 'active' ? '<span class="badge success">In house</span>' : '<span class="badge neutral">Checked out</span>'}
+          <div class="st-title">
+            <h1>${title}</h1>
+            <dl>
+              <div><dt>Folio no.</dt><dd class="mono">F-${esc(String(s.id).slice(0, 8).toUpperCase())}</dd></div>
+              <div><dt>Statement date</dt><dd>${fmtDate(today())}</dd></div>
+              <div><dt>Status</dt><dd>${settled ? 'Settled' : s.status === 'active' ? 'In house' : 'Checked out'}</dd></div>
+            </dl>
           </div>
-        </div>
-        <div class="folio-strip">
-          <div><small>Total charges</small><b>${money(total)}</b></div>
-          <div><small>Payments received</small><b>${money(paid)}</b></div>
-          <div><small>Balance to settle</small><b>${money(balance)}</b></div>
-        </div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Date</th><th>Invoice</th><th>Outlet</th><th>Description</th><th class="r">Amount</th><th class="r">Outstanding</th><th>Status</th></tr></thead>
-          <tbody>${bills.length ? bills.map((b) => `
-            <tr class="clickable" tabindex="0" data-act="invoice" data-arg="${esc(b.id)}">
-              <td>${fmtDate(b.date)}</td>
-              <td><span class="primary-text mono">${esc(b.number)}</span></td>
-              <td>${esc(outletName(b.outlet_id))}</td>
-              <td class="wrap">${esc(billSummary(b))}</td>
-              <td class="r amount">${money(b.amount)}</td>
-              <td class="r muted-amount">${money(outstanding(b))}</td>
-              <td>${statusBadge(b)}</td>
-            </tr>`).join('') : `<tr><td colspan="7">${emptyState('invoices', 'No charges yet', 'Outlet charges posted to this stay will appear here.')}</td></tr>`}
-          </tbody>
+        </header>
+        <section class="st-guest">
+          <div><h4>Guest</h4><strong>${esc(s.guest_name)}</strong></div>
+          <div><h4>Room</h4><strong>${esc(s.room)}</strong><p>${esc(s.property)}</p></div>
+          <div><h4>Stay</h4><strong>${fmtDate(s.arrival)} – ${fmtDate(s.departure)}</strong><p>${n} night${n === 1 ? '' : 's'}</p></div>
+          <div class="st-due"><h4>Balance due</h4><strong>${esc(currency())} ${money(balance)}</strong></div>
+        </section>
+        ${!isAdmin() ? `<p class="st-scope">${icon('info', 'sm')} Shows ${esc(myOutletName())} charges and collections only.</p>` : ''}
+        <div class="st-table"><table class="st-lines">
+          <thead><tr><th>Date</th><th>Reference</th><th>Description</th><th>Outlet</th><th class="r">Charges</th><th class="r">Payments</th><th class="r">Balance</th></tr></thead>
+          <tbody>${tx.length ? tx.map((t) => `<tr class="${t.credit ? 'st-pay' : 'clickable'}" ${t.id ? `tabindex="0" data-act="invoice" data-arg="${esc(t.id)}"` : ''}>
+            <td>${fmtDate(t.date)}</td><td class="mono">${esc(t.ref)}</td>
+            <td class="wrap">${esc(t.desc)}${t.pending ? ' <span class="st-flag">Pending review</span>' : ''}</td><td>${esc(t.outlet)}</td>
+            <td class="r">${t.charge ? money(t.charge) : ''}</td><td class="r">${t.credit ? money(t.credit) : ''}</td><td class="r">${money(t.balance)}</td>
+          </tr>`).join('') : `<tr><td colspan="7">${emptyState('invoices', 'No charges yet', 'Outlet charges posted to this stay will appear here.')}</td></tr>`}</tbody>
         </table></div>
-        <div class="folio-cols">
-          <div class="folio-section">
-            <h3>Charges by outlet</h3>
-            ${byOutlet.length ? byOutlet.map((o) => `<div class="kv"><span>${esc(o.name)} · ${esc(o.category || 'Other')}</span><strong>${money(sum(bills.filter((b) => b.outlet_id === o.id)))}</strong></div>`).join('') : '<p class="kpi-foot">No charges posted.</p>'}
-            ${bills.length ? `<div class="kv total"><span>Total</span><strong>${esc(currency())} ${money(total)}</strong></div>` : ''}
+        <div class="st-bottom">
+          <div class="st-side">
+            ${byOutlet.length ? `<h4>Charges by outlet</h4><table class="st-mini"><tbody>${byOutlet.map((o) => `<tr><td>${esc(o.name)}<span>${esc(o.category || '')}</span></td><td class="r">${money(sum(bills.filter((b) => b.outlet_id === o.id)))}</td></tr>`).join('')}</tbody></table>` : ''}
+            ${brand.payment_info ? `<h4>Payment details</h4><p class="st-pre">${esc(brand.payment_info)}</p>` : ''}
           </div>
-          <div class="folio-section">
-            <h3>Payments received</h3>
-            ${receipts.size ? [...receipts.values()].map((r) => `<div class="kv"><span>${fmtDate(r.date)} · ${esc(r.method)} · <span class="mono">${esc(r.reference)}</span></span><strong>${money(r.amount)}</strong></div>`).join('') : '<p class="kpi-foot">No payments recorded.</p>'}
-            ${receipts.size ? `<div class="kv total"><span>Balance due</span><strong>${esc(currency())} ${money(balance)}</strong></div>` : ''}
+          <div class="st-totals">
+            <div><span>Total charges</span><span>${money(total)}</span></div>
+            <div><span>Payments received</span><span>− ${money(paid)}</span></div>
+            <div class="grand"><span>Balance due</span><span>${esc(currency())} ${money(balance)}</span></div>
           </div>
         </div>
-        <div class="folio-note">${pending ? 'Provisional statement — pending charges may change after review. ' : 'All amounts as posted by the outlets. '}Generated ${fmtDateTime(Date.now())} (Maldives time).</div>
-      </section>`;
+        <div class="st-sign"><div><span></span>Guest signature</div><div><span></span>For ${esc(legalName())}</div></div>
+        <footer class="st-foot">
+          ${brand.terms ? `<p class="st-pre">${esc(brand.terms)}</p>` : ''}
+          <p>${pending ? 'Provisional statement: pending charges may change after review. ' : ''}All amounts in ${esc(currency())}. Generated ${fmtDateTime(Date.now())} (Maldives time).</p>
+        </footer>
+      </article>`;
   }
 
   /* ------------------------------------------------------------------ *
@@ -1073,7 +1115,73 @@
         </div>`).join('')}
         <div class="folio-note">Username logins work immediately. Email users create their own account with the assigned email and confirm it before signing in.</div>
       </section>
-    </div>`;
+    </div>${brandingCard()}`;
+  }
+
+  function brandingCard() {
+    const b = brand;
+    const ta = (name, label, rows, max, ph, hint = '') => `<label class="field wide"><span>${label}${hint ? ` <span class="hint">· ${hint}</span>` : ''}</span><textarea name="${name}" rows="${rows}" maxlength="${max}" placeholder="${esc(ph)}">${esc(b[name] || '')}</textarea></label>`;
+    const tx = (name, label, max, ph, type = 'text') => `<label class="field"><span>${label}</span><input name="${name}" type="${type}" value="${esc(b[name] || '')}" maxlength="${max}" placeholder="${esc(ph)}"></label>`;
+    return `<section class="card" style="margin-top:20px">
+      <div class="card-head"><div><h2>Branding</h2><p>Logo, colour and company details printed on guest folios and invoices.</p></div></div>
+      ${brandError && !demo ? `<div class="rate-note warn-note">${icon('alert', 'sm')} ${esc(brandError)}</div>` : ''}
+      <form data-form="branding-save">
+        <div class="card-body brand-grid">
+          <div class="brand-aside">
+            <span class="field-label">Logo</span>
+            <div class="logo-drop" id="logoPreview">${b.logo ? `<img src="${esc(b.logo)}" alt="Logo preview">` : `<span>${icon('building', 'lg')}<small>No logo yet</small></span>`}</div>
+            <input type="hidden" name="logo" value="${esc(b.logo || '')}">
+            <div class="btn-row">
+              <label class="btn sm">${icon('download', 'sm')} Upload logo<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" data-change="logo-file" hidden></label>
+              <button type="button" class="btn sm ghost" data-act="logo-remove">Remove</button>
+            </div>
+            <p class="hint-line">PNG, JPG, WebP or SVG. It is resized automatically.</p>
+            <label class="field"><span>Brand colour</span><div class="color-row"><input type="color" value="${brandColor()}" data-change="brand-color" aria-label="Pick brand colour"><input name="color" value="${esc(brandColor().toUpperCase())}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" data-input="brand-hex" aria-label="Brand colour hex"></div></label>
+            <div class="brand-swatch" id="brandSwatch" style="background:${brandColor()};color:${inkOn(brandColor())}">Balance due · ${esc(currency())} 0.00</div>
+          </div>
+          <div class="form-grid">
+            ${tx('legal_name', 'Registered company name', 160, data.settings.company)}
+            ${tx('tagline', 'Tagline <span class="hint">· optional</span>', 120, 'e.g. Island guest houses & experiences')}
+            ${ta('address', 'Address', 2, 400, 'Street, island / atoll, country')}
+            ${tx('phone', 'Phone', 60, '+960 …', 'tel')}
+            ${tx('email', 'Email', 120, 'accounts@…', 'email')}
+            ${tx('website', 'Website', 160, 'www.…')}
+            ${tx('tax_id', 'Tax / registration no.', 80, 'TIN / GST no.')}
+            ${ta('payment_info', 'Payment details', 3, 800, 'Bank name, account name, account no., SWIFT · Cards accepted', 'printed on folios and invoices')}
+            ${ta('terms', 'Terms & footer note', 3, 1200, 'e.g. Prices include service charge and taxes. Payment is due at checkout.')}
+          </div>
+        </div>
+        <div class="form-error" style="padding:0 20px 14px"></div>
+        <div class="modal-foot" style="border-radius:0 0 var(--radius) var(--radius)"><button class="btn primary" type="submit">${icon('check', 'sm')} Save branding</button></div>
+      </form>
+    </section>`;
+  }
+
+  // Resize an uploaded logo to fit within 480×160 and return a PNG data URL (keeps transparency).
+  function logoToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Could not read the file.'));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('That file is not an image we can use.'));
+        img.onload = () => {
+          let scale = Math.min(1, 480 / (img.naturalWidth || 480), 160 / (img.naturalHeight || 160));
+          for (let i = 0; i < 4; i++) {
+            const c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round((img.naturalWidth || 480) * scale));
+            c.height = Math.max(1, Math.round((img.naturalHeight || 160) * scale));
+            c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+            const url = c.toDataURL('image/png');
+            if (url.length < 280000) return resolve(url);
+            scale *= 0.7;
+          }
+          reject(new Error('The logo is too detailed. Try a smaller image.'));
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
   /* ------------------------------------------------------------------ *
@@ -1395,7 +1503,7 @@
       await post(name, values);
       if (name !== 'settings') closeOverlay();
       await load();
-      toast({ settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', members: 'User added. They can now create their account.' }[name] || 'Saved to your workspace.');
+      toast({ settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.' }[name] || 'Saved to your workspace.');
     } catch (err) {
       errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
       btn.disabled = false;
@@ -1433,7 +1541,7 @@
       </div>
       <div id="detailError" class="form-error doc-error"></div>
       ${!b.stay_id && isAdmin() ? `<div class="alert warn doc-alert">${icon('link', 'sm')}<span class="grow">This invoice isn’t linked to a guest stay.</span><button class="link" data-act="form" data-arg="link" data-arg2="${esc(id)}">Assign guest</button></div>` : ''}
-      <article class="invoice-doc" aria-label="Invoice ${esc(b.number)}">
+      <article class="invoice-doc" ${docStyle()} aria-label="Invoice ${esc(b.number)}">
         ${status === 'Paid' ? '<div class="doc-stamp">Paid</div>' : ''}
         <header class="inv-head">
           <div class="inv-from">
@@ -1441,7 +1549,7 @@
             <div>
               <h2>${esc(o.name)}</h2>
               <p>${esc([o.category, o.location].filter(Boolean).join(' · '))}</p>
-              <p>An outlet of ${esc(data.settings.company)}</p>
+              <p>An outlet of ${esc(legalName())}</p>
             </div>
           </div>
           <div class="inv-title">
@@ -1459,7 +1567,7 @@
             ${s ? `<p>Stay ${fmtDate(s.arrival)} – ${fmtDate(s.departure)}</p>` : ''}</div>
           <div><h4>Issued by</h4><strong>${esc(o.name)}</strong>
             <p>${esc(o.location || '')}</p><p>${esc(o.category || '')}</p></div>
-          <div><h4>Payment</h4><strong>${esc(data.settings.company)} front office</strong>
+          <div><h4>Payment</h4><strong>${esc(legalName())} front office</strong>
             <p>Settled on the guest’s consolidated bill</p><p>Status: ${esc(status)}</p></div>
         </section>
         <table class="inv-lines">
@@ -1487,6 +1595,9 @@
           </div>
         </div>
         <footer class="inv-foot">
+          <div class="inv-brandline">${brandMark('sm')}<div><strong>${esc(legalName())}</strong><span>${[brand.address ? esc(brand.address).replace(/\n/g, ', ') : '', brandContacts(), brand.tax_id ? 'Reg. / Tax no. ' + esc(brand.tax_id) : ''].filter(Boolean).join(' · ')}</span></div></div>
+          ${brand.payment_info ? `<p class="st-pre"><b>Payment details</b><br>${esc(brand.payment_info)}</p>` : ''}
+          ${brand.terms ? `<p class="st-pre">${esc(brand.terms)}</p>` : ''}
           <p>Posted by ${esc(loginName(b.created_by))} · ${b.status === 'pending' ? 'Awaiting head office review' : 'Approved for collection'}</p>
           <p>This charge is collected by the ${esc(data.settings.company)} front office as part of the guest’s consolidated bill. All amounts in ${esc(currency())}.</p>
         </footer>
@@ -1552,7 +1663,9 @@
     closeOverlay();
     if (!demo) {
       rateCards = {}; ui.rateDraft = null; ui.rateDirty = false; ui.rateOutlet = null;
+      brand = {};
       loadRates();
+      loadBranding();
       if (!liveData) return renderAuth();
       data = liveData;
       ui.selectedStay = null;
@@ -1612,6 +1725,12 @@
       ],
     };
     rateCards = demoRateCards();
+    brand = {
+      legal_name: 'Cozy Hospitality Pvt Ltd', tagline: 'Island guest houses & experiences', color: '#0E6B55',
+      address: 'Cozy Nest, Hithadhoo Magu\nFuvahmulah 18020, Maldives', phone: '+960 777 0000', email: 'accounts@cozy.example', website: 'www.cozy.example',
+      tax_id: 'GST 1000000GST501', payment_info: 'Bank of Maldives · Cozy Hospitality Pvt Ltd · USD acc. 7730000000000 · SWIFT MALBMVMV\nVisa, Mastercard and cash accepted at the front office.',
+      terms: 'All prices include 10% service charge and applicable taxes. Payment is due at checkout. Thank you for staying with us.',
+    };
     ui.rateDraft = null; ui.rateDirty = false; ui.rateOutlet = null;
     demoRole = 'admin';
     applyDemoRole();
@@ -1731,6 +1850,10 @@
     'rate-del': (idx) => { ui.rateDraft.items.splice(Number(idx), 1); ui.rateDirty = true; render(); },
     'rate-reset': () => { ui.rateDraft = null; ui.rateDirty = false; render(); },
     'rate-save': () => saveRates(),
+    'logo-remove': () => {
+      document.querySelector('[name=logo]').value = '';
+      document.getElementById('logoPreview').innerHTML = `<span>${icon('building', 'lg')}<small>No logo yet</small></span>`;
+    },
     'goto-rates': (oid) => { closeOverlay(); ui.rateOutlet = oid; ui.rateDraft = null; ui.rateDirty = false; navigate('Rates'); },
     'rate-load-scuba': () => {
       const d = ui.rateDraft;
@@ -1788,6 +1911,14 @@
     if (key === 'search') { ui.search = e.target.value; updateInvoiceRows(); }
     else if (key === 'guestQuery') { ui.guestQuery = e.target.value; document.getElementById('guestRows').innerHTML = guestRows(); }
     else if (key === 'rateQuery') { ui.rateQuery = e.target.value; document.getElementById('rateRows').innerHTML = rateRowsHtml(); }
+    else if (key === 'brand-hex') {
+      const v = e.target.value.trim();
+      if (/^#[0-9a-f]{6}$/i.test(v)) {
+        document.querySelector('[data-change=brand-color]').value = v;
+        const sw = document.getElementById('brandSwatch');
+        if (sw) { sw.style.background = v; sw.style.color = inkOn(v); }
+      }
+    }
     else if (key === 'bi-recalc') { bbRecalc(e.target.closest('[data-builder]')); }
     else if (key === 'stayFilter') { document.getElementById('guestSelect').innerHTML = '<option value="">Select guest and room</option>' + stayOptions(e.target.value); }
   });
@@ -1795,6 +1926,20 @@
   document.addEventListener('change', (e) => {
     if (e.target.dataset.change === 'outletFilter') { ui.outletFilter = e.target.value; updateInvoiceRows(); }
     if (e.target.dataset.rateMeta === 'currency') { render(); return; }
+    if (e.target.dataset.change === 'logo-file' && e.target.files[0]) {
+      logoToDataUrl(e.target.files[0]).then((url) => {
+        document.querySelector('[name=logo]').value = url;
+        document.getElementById('logoPreview').innerHTML = `<img src="${url}" alt="Logo preview">`;
+      }).catch((err) => toast(err.message));
+      return;
+    }
+    if (e.target.dataset.change === 'brand-color') {
+      const hex = e.target.value.toUpperCase();
+      document.querySelector('[name=color]').value = hex;
+      const sw = document.getElementById('brandSwatch');
+      if (sw) { sw.style.background = hex; sw.style.color = inkOn(hex); }
+      return;
+    }
     if (e.target.dataset.change === 'rateOutlet') {
       if (ui.rateDirty && !confirm('Discard unsaved changes to this rate card?')) { e.target.value = ui.rateOutlet; return; }
       ui.rateOutlet = e.target.value; ui.rateDraft = null; ui.rateDirty = false; ui.rateQuery = ''; render(); return;

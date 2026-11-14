@@ -1,5 +1,6 @@
 import {staff} from './_staff.js';
 import {rates} from './_rates.js';
+import {branding} from './_branding.js';
 // The Vercel function relays only the signed-in caller's JWT to the isolated database API.
 export default async function handler(req,res){
  const url=new URL(req.url,'https://localhost'),path=url.searchParams.has('route')?'/api/'+url.searchParams.get('route'):url.pathname;
@@ -13,6 +14,7 @@ export default async function handler(req,res){
  if(req.method==='POST'&&(!origin||new URL(origin).host!==host))return res.status(403).json({error:'Invalid request origin.'});
  if(path==='/api/staff-create'||path==='/api/staff-reset')return staff(req,res,path,{endpoint,key,domain});
  if(path==='/api/rates'||path==='/api/rates-save')return rates(req,res,path,{endpoint,key});
+ if(path==='/api/branding'||path==='/api/branding-save')return branding(req,res,path,{endpoint,key});
  const target=new URL(endpoint+'/functions/v1/cozy-guest-ledger');target.searchParams.set('path',path);
  try{const upstream=await fetch(target,{method:req.method,headers:{Authorization:req.headers.authorization,apikey:key,'Content-Type':'application/json'},...(req.method==='POST'?{body:JSON.stringify(req.body)}:{})});
  res.status(upstream.status).setHeader('Content-Type','application/json');res.send(await upstream.text());
