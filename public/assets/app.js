@@ -96,7 +96,7 @@
   let rateError = '';
   let brand = {};           // workspace branding: logo, color, legal_name, address, phone, email, website, tax_id, payment_info, terms, tagline
   let brandError = '';
-  const brandColor = () => (/^#[0-9a-f]{6}$/i.test(brand.color || '') ? brand.color : '#0e6b55');
+  const brandColor = () => (/^#[0-9a-f]{6}$/i.test(brand.color || '') ? brand.color : '#0F6E6A');
   function inkOn(hex) {
     const n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
     return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.6 ? '#0f1a24' : '#ffffff';
@@ -1726,7 +1726,7 @@
     };
     rateCards = demoRateCards();
     brand = {
-      legal_name: 'Cozy Hospitality Pvt Ltd', tagline: 'Island guest houses & experiences', color: '#0E6B55',
+      legal_name: 'Cozy Hospitality Pvt Ltd', tagline: 'Island guest houses & experiences', color: '#0F6E6A',
       address: 'Cozy Nest, Hithadhoo Magu\nFuvahmulah 18020, Maldives', phone: '+960 777 0000', email: 'accounts@cozy.example', website: 'www.cozy.example',
       tax_id: 'GST 1000000GST501', payment_info: 'Bank of Maldives · Cozy Hospitality Pvt Ltd · USD acc. 7730000000000 · SWIFT MALBMVMV\nVisa, Mastercard and cash accepted at the front office.',
       terms: 'All prices include 10% service charge and applicable taxes. Payment is due at checkout. Thank you for staying with us.',
