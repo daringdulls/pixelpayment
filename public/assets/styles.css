@@ -755,7 +755,7 @@ tfoot td { padding: 12px 20px; font-weight: 700; color: var(--ink); background: 
 
 /* =====================================================================
  * v4 · "Reef ledger" theme
- * Type: Bricolage Grotesque (titles & figures) · Instrument Sans (UI) · IBM Plex Mono (references)
+ * Type: Bricolage Grotesque (titles & figures) · Source Sans 3 (UI) · IBM Plex Mono (references)
  * Colour: reef ink #0B1F2A · lagoon #0F6E6A · shallows #E7F2F1 · sea mist #F2F5F6 · coral #E0674B
  * Signature: perforated receipt edge on folios and invoices (screen only)
  * ===================================================================== */
@@ -1070,4 +1070,31 @@ thead th { padding: 9px 20px; }
 }
 @media (max-width: 640px) {
   .inv-compact th:nth-child(3), .inv-compact td:nth-child(3) { display: none; }
+}
+
+/* =====================================================================
+ * Type pairing: Bricolage Grotesque (headings & figures) + Source Sans 3 (interface)
+ * ===================================================================== */
+:root { --font: 'Source Sans 3', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+body { font-family: var(--font); letter-spacing: 0; font-size-adjust: 0.52; line-height: 1.5; }
+.page-head h1, .auth-hero h1, .auth-card h2, .wordmark, .kpi-value, .amount-hero .amt, .outlet-card .big,
+.modal-head h2, .lh-doc h1, .lh-name, .st-title h1, .inv-title h1, .st-guest .st-due strong, .st-totals .grand, .inv-totals .grand,
+.bb-totals .grand, .folio-head h2, .card-head h2, .mono, .page-eyebrow, .nav-label, .status-pill, .lh-sub, .kpi-value .cur { font-size-adjust: none; }
+thead th { font-weight: 600; letter-spacing: .06em; }
+.nav-item { font-weight: 500; }
+.btn { font-weight: 600; letter-spacing: .005em; }
+td .primary-text, .list-row strong { font-weight: 600; }
+@media print {
+  body, .statement-doc, .invoice-doc { font-size-adjust: none; }
+  .st-sign { margin-top: 22px; }
+}
+@media print {
+  .statement-doc { line-height: 1.4; }
+  .lh-meta div { padding: 4px 10px; }
+  .lh-bottom { padding-top: 10px; }
+  .st-lines tbody td { padding: 6px 8px; }
+  .st-mini td { padding: 4px 0; }
+  .st-side h4 + * { margin-bottom: 12px; }
+  .st-bottom { margin-top: 12px; }
+  .st-foot { margin-top: 12px; padding-top: 10px; }
 }
