@@ -627,6 +627,7 @@
             </div>`).join('') : emptyState('checkCircle', 'All clear', 'No bills awaiting review and nothing overdue.')}
         </section>
       </div>
+      ${departuresCard()}
       <section class="card" style="margin-bottom:20px">
         <div class="card-head"><div><h2>Outlet performance</h2><p>Billing and collections by outlet</p></div><button class="link" data-act="nav" data-arg="Outlets">Manage outlets ${icon('arrowRight', 'sm')}</button></div>
         <div class="table-wrap"><table>
@@ -643,6 +644,42 @@
       <section class="card">
         <div class="card-head"><div><h2>Recent invoices</h2><p>Latest bills posted by your outlets</p></div><button class="link" data-act="nav" data-arg="Invoices">View all ${icon('arrowRight', 'sm')}</button></div>
         <div class="table-wrap"><table>${invoiceHead()}<tbody>${invoiceRowsHtml(recent)}</tbody></table></div>
+      </section>`;
+  }
+
+  // Guests checking out tomorrow, with what still needs doing before checkout.
+  function departuresCard() {
+    const tomorrow = shiftDate(today(), 1);
+    const list = stays().filter((s) => s.status === 'active' && s.departure === tomorrow)
+      .map((s) => {
+        const bills = billsForStay(s.id);
+        const total = sum(bills), balance = total - bills.reduce((t, b) => t + paidFor(b.id), 0);
+        const pending = bills.filter((b) => b.status === 'pending').length;
+        const state = pending ? ['pending', `${pending} to review`] : balance > 0 ? ['unpaid', 'Payment due'] : ['paid', 'Ready to check out'];
+        return { s, bills, total, balance, state };
+      })
+      .sort((a, b) => String(a.s.room).localeCompare(String(b.s.room), undefined, { numeric: true }));
+    const due = list.reduce((t, r) => t + Math.max(0, r.balance), 0);
+    const ready = list.filter((r) => r.state[0] === 'paid').length;
+    return `
+      <section class="card" style="margin-bottom:20px">
+        <div class="card-head">
+          <div><h2>Tomorrow’s departures</h2><p>${fmtDate(tomorrow)} · ${list.length} guest${list.length === 1 ? '' : 's'} checking out${list.length ? ` · ${ready} ready · ${esc(currency())} ${money(due)} to collect` : ''}</p></div>
+          <span class="badge ${list.length ? 'info' : 'neutral'}">${list.length} departure${list.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Guest</th><th>Room</th><th>Stay</th><th class="r">Charges</th><th class="r">Balance (${esc(currency())})</th><th>Checkout status</th><th></th></tr></thead>
+          <tbody>${list.length ? list.map(({ s, bills, balance, state }) => `
+            <tr class="clickable" tabindex="0" data-act="guest-from" data-arg="${esc(s.id)}">
+              <td><div class="person"><span class="avatar">${esc(initials(s.guest_name))}</span><div><span class="primary-text">${esc(s.guest_name)}</span><span class="secondary-text">${esc(s.property)}</span></div></div></td>
+              <td><span class="tag">${icon('bed', 'sm')}&nbsp;${esc(s.room)}</span></td>
+              <td>${fmtShort(s.arrival)} – ${fmtShort(s.departure)}<span class="secondary-text">${nights(s.arrival, s.departure)} nights</span></td>
+              <td class="r num">${bills.length}</td>
+              <td class="r amount">${money(balance)}</td>
+              <td><span class="badge ${state[0]}">${state[1]}</span></td>
+              <td class="r"><span class="link">Open folio ${icon('chevronRight', 'sm')}</span></td>
+            </tr>`).join('') : `<tr><td colspan="7">${emptyState('calendar', 'No departures tomorrow', 'Guests due to check out tomorrow will appear here.')}</td></tr>`}</tbody>
+        </table></div>
       </section>`;
   }
 
