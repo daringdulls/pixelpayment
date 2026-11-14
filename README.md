@@ -1,34 +1,30 @@
-# Pixel Payment: redesigned frontend
+# Pixel Payment: Cozy Guest Ledger
 
-A drop-in replacement for the frontend at cozy-guest-ledger.vercel.app.
-The backend is unchanged. It makes the same Supabase auth and `/api/*` calls:
+Guest billing across guest houses, restaurants, dive centres, souvenir shops and other outlets.
+Outlet staff post charges against a registered guest stay. The front office sees one consolidated bill per guest and settles it at checkout.
 
-| Call | Used for |
+Live: https://cozy-guest-ledger.vercel.app
+
+## Architecture
+- **Vercel** (this repo): static frontend plus a same-origin API relay.
+  - `public/`: the app (`index.html`, `assets/app.js`, `assets/styles.css`). No framework, no bundler.
+  - `api/handler.js`: forwards `/api/*` calls with the signed-in user's token to the Supabase Edge Function `cozy-guest-ledger`.
+  - `scripts/build.mjs`: copies `public/` to `dist/` and adds the Supabase browser client from npm.
+  - `vercel.json`: rewrites, security headers, region `sin1`.
+- **Supabase**: staff sign-in (email/password), PostgreSQL schema `cozy_ledger`, and the `cozy-guest-ledger` Edge Function.
+  The Edge Function and migration source are **not in this repo yet**; they are in the original local project (`supabase/` folder).
+
+## Environment variables (Vercel)
+| Name | Purpose |
 |---|---|
-| `GET /api/config` | Supabase URL + anon key |
-| `GET /api/data` | Workspace snapshot |
-| `POST /api/stays`, `outlets`, `bills`, `members`, `payments`, `settle`, `settings`, `approve`, `approve-stay`, `checkout`, `link-bill` | Mutations (same field names as before) |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase anon/publishable key (served to the browser via `/api/config`) |
 
-## Files
-- `index.html`: app shell
-- `assets/styles.css`: design system (tokens, components, responsive, print)
-- `assets/app.js`: readable, unminified app logic (no build step)
-- `assets/supabase.js`: vendored `@supabase/supabase-js@2.45.4` UMD build
+## Develop
+```bash
+npm install
+npm run build   # outputs dist/
+```
 
-## Deploy
-Copy these files over the current static frontend in the Vercel project
-(replace `index.html` and `assets/app.js`, then add `assets/styles.css` and `assets/supabase.js`).
-Keep the existing `api/` functions as they are.
-
-## What changed
-- New split-screen sign-in with Sign in / Create account tabs and a demo entry point.
-- Dark navigation sidebar grouped by role (Front office, Finance, Operations, Administration).
-- Consistent "Pixel Payment" branding (the old build mixed in "outlet ledger" in several places).
-- KPI cards, an SVG bar chart with a scaled axis, and per-outlet collection-progress bars.
-- Status filter chips with counts, and a live outstanding total for the filtered invoices.
-- Invoice details open in a side drawer instead of a modal.
-- Guest folio laid out like a statement, with charges by outlet, payments, and the balance due. It prints cleanly to PDF.
-- Activity log shows relative times with action icons.
-- Keyboard support: rows are focusable, Escape closes dialogs, and focus stays inside open dialogs.
-- Confirmation step before checkout.
-- Fuller demo data: 4 guests, including one checked out, pending, overdue and partially paid invoices, and an activity history.
+## API used by the frontend
+`GET /api/config`, `GET /api/data`, `POST /api/{stays|outlets|bills|members|payments|settle|settings|approve|approve-stay|checkout|link-bill}`
