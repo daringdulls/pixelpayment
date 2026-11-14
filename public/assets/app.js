@@ -104,6 +104,21 @@
   const legalName = () => brand.legal_name || data.settings.company;
   const docStyle = () => `style="--doc-accent:${brandColor()};--doc-on-accent:${inkOn(brandColor())}"`;
   const brandContacts = () => [brand.phone, brand.email, brand.website].filter(Boolean).map(esc).join(' · ');
+  // Two-currency support (USD and MVR). The rate is MVR per 1 USD, set by head office.
+  const fxRate = () => Number(brand.fx_usd_mvr) || 0;
+  const altCurrency = () => (currency() === 'USD' ? 'MVR' : currency() === 'MVR' ? 'USD' : null);
+  const billCurrencies = () => (altCurrency() && fxRate() ? [currency(), altCurrency()] : [currency()]);
+  const r2 = (x) => Math.round(x * 100) / 100;
+  function convert(a, from, to, rate = fxRate()) {
+    if (from === to) return a;
+    if (!rate) return NaN;
+    if (from === 'USD' && to === 'MVR') return a * rate;
+    if (from === 'MVR' && to === 'USD') return a / rate;
+    return NaN;
+  }
+  const fxText = (rate = fxRate()) => `1 USD = ${rate} MVR`;
+  const fxLine = (rate = fxRate()) => `Exchange rate: ${fxText(rate)}`;
+  const altAmount = (cents) => (altCurrency() && fxRate() ? `${altCurrency()} ${money(Math.round(convert(cents, currency(), altCurrency())))}` : '');
   const brandMark = (cls = '') => (brand.logo
     ? `<img class="brand-logo ${cls}" src="${esc(brand.logo)}" alt="${esc(legalName())}">`
     : `<div class="brand-mark ${cls}">${esc(initials(legalName()))}</div>`);
@@ -599,22 +614,25 @@
     const title = !isAdmin() ? 'Outlet statement' : pending ? 'Provisional folio' : 'Guest folio';
     return `
       <article class="statement-doc" id="guestFolio" ${docStyle()}>
-        <header class="st-head">
-          <div class="st-brand">${brandMark()}
-            <div>
-              <h2>${esc(legalName())}</h2>
-              ${brand.tagline ? `<p class="st-tagline">${esc(brand.tagline)}</p>` : ''}
+        <header class="lh">
+          <div class="lh-top">
+            <div class="lh-identity">${brandMark('lh-mark')}${brand.logo ? '' : `<div class="lh-name">${esc(legalName())}</div>`}</div>
+            <div class="lh-doc"><h1>${title}</h1><span class="lh-sub">Statement of account</span></div>
+          </div>
+          <div class="lh-bottom">
+            <div class="lh-from">
+              ${brand.logo ? `<strong>${esc(legalName())}</strong>` : ''}
+              ${brand.tagline ? `<p class="lh-tagline">${esc(brand.tagline)}</p>` : ''}
               ${brand.address ? `<p>${esc(brand.address).replace(/\n/g, '<br>')}</p>` : ''}
               ${brandContacts() ? `<p>${brandContacts()}</p>` : ''}
               ${brand.tax_id ? `<p>Reg. / Tax no. ${esc(brand.tax_id)}</p>` : ''}
             </div>
-          </div>
-          <div class="st-title">
-            <h1>${title}</h1>
-            <dl>
+            <dl class="lh-meta">
               <div><dt>Folio no.</dt><dd class="mono">F-${esc(String(s.id).slice(0, 8).toUpperCase())}</dd></div>
               <div><dt>Statement date</dt><dd>${fmtDate(today())}</dd></div>
               <div><dt>Status</dt><dd>${settled ? 'Settled' : s.status === 'active' ? 'In house' : 'Checked out'}</dd></div>
+              <div><dt>Currency</dt><dd>${esc(currency())}</dd></div>
+              ${altAmount(0) ? `<div><dt>Exchange rate</dt><dd>${esc(fxText())}</dd></div>` : ''}
             </dl>
           </div>
         </header>
@@ -622,7 +640,7 @@
           <div><h4>Guest</h4><strong>${esc(s.guest_name)}</strong></div>
           <div><h4>Room</h4><strong>${esc(s.room)}</strong><p>${esc(s.property)}</p></div>
           <div><h4>Stay</h4><strong>${fmtDate(s.arrival)} – ${fmtDate(s.departure)}</strong><p>${n} night${n === 1 ? '' : 's'}</p></div>
-          <div class="st-due"><h4>Balance due</h4><strong>${esc(currency())} ${money(balance)}</strong></div>
+          <div class="st-due"><h4>Balance due</h4><strong>${esc(currency())} ${money(balance)}</strong>${altAmount(balance) ? `<p>≈ ${esc(altAmount(balance))}</p>` : ''}</div>
         </section>
         ${!isAdmin() ? `<p class="st-scope">${icon('info', 'sm')} Shows ${esc(myOutletName())} charges and collections only.</p>` : ''}
         <div class="st-table"><table class="st-lines">
@@ -642,6 +660,7 @@
             <div><span>Total charges</span><span>${money(total)}</span></div>
             <div><span>Payments received</span><span>− ${money(paid)}</span></div>
             <div class="grand"><span>Balance due</span><span>${esc(currency())} ${money(balance)}</span></div>
+            ${altAmount(balance) ? `<div class="alt-due"><span>In ${esc(altCurrency())} at ${esc(fxText())}</span><span>${esc(altAmount(balance))}</span></div>` : ''}
           </div>
         </div>
         <div class="st-sign"><div><span></span>Guest signature</div><div><span></span>For ${esc(legalName())}</div></div>
@@ -912,7 +931,8 @@
   const rid = () => Math.random().toString(36).slice(2, 10);
   const cardFor = (oid) => { const c = rateCards[String(oid)]; return c && Array.isArray(c.items) && c.items.length ? c : null; };
   const cardCurrency = (c) => String(c?.currency || currency()).toUpperCase();
-  const cardFx = (c) => (cardCurrency(c) === currency() ? 1 : Number(c?.fx_rate) || 1);
+  // Rate (MVR per USD) used for a rate card: the workspace rate, else the card's own legacy rate.
+  const cardRate = (c) => fxRate() || (cardCurrency(c) === 'USD' ? Number(c?.fx_rate) || 0 : Number(c?.fx_rate) ? 1 / Number(c.fx_rate) : 0);
 
   // Itemised bills are stored as text lines in the bill description:  "2 × Fun Dive 1 @ USD 81.00"
   const LINE_RE = /^(\d+(?:\.\d+)?)\s*×\s*(.+?)\s*@\s*(?:([A-Z]{3})\s+)?(-?[\d,]*\.?\d+)$/;
@@ -974,9 +994,9 @@
           ${isAdmin() ? `<select class="input" data-change="rateOutlet" aria-label="Outlet">${data.outlets.map((o) => `<option value="${esc(o.id)}" ${o.id === oid ? 'selected' : ''}>${esc(o.name)}${cardFor(o.id) ? ' · ' + cardFor(o.id).items.length + ' items' : ''}</option>`).join('')}</select>` : ''}
           <div class="search">${icon('search', 'sm')}<input class="input" type="search" aria-label="Search items" placeholder="Search items or categories…" value="${esc(ui.rateQuery)}" data-input="rateQuery"></div>
           <label class="inline-field">Prices in <input class="input" data-rate-meta="currency" value="${esc(d.currency)}" maxlength="3" aria-label="Price currency" style="width:70px;text-transform:uppercase"></label>
-          ${foreign ? `<label class="inline-field">1 ${esc(d.currency)} = <input class="input" type="number" step="0.0001" min="0.0001" data-rate-meta="fx_rate" value="${esc(d.fx_rate)}" aria-label="Exchange rate" style="width:96px"> ${esc(currency())}</label>` : ''}
+
         </div>
-        ${foreign ? `<div class="rate-note">${icon('info', 'sm')} Bills are built in ${esc(d.currency)} and charged to the guest in ${esc(currency())} at this rate. The rate used is printed on each invoice.</div>` : ''}
+        ${foreign || billCurrencies().length > 1 ? `<div class="rate-note">${icon('info', 'sm')} ${fxRate() ? `Outlets can bill in ${esc(billCurrencies().join(' or '))}. Prices convert at the workspace rate ${esc(fxText())}, which is printed on each invoice.` : `Set the USD ↔ MVR exchange rate in Settings to bill in both currencies.`}</div>` : ''}
         <div class="table-wrap"><table class="rate-table">
           <thead><tr><th style="width:28%">Category</th><th>Item</th><th class="r" style="width:160px">Price (${esc(d.currency)})</th><th style="width:52px"></th></tr></thead>
           <tbody id="rateRows">${rateRowsHtml()}</tbody>
@@ -1030,7 +1050,7 @@
     const btn = document.getElementById('rateSaveBtn');
     if (btn) btn.disabled = true;
     try {
-      const res = await post('rates-save', { outlet_id: d.outlet_id, currency: d.currency, fx_rate: d.currency === currency() ? 1 : Number(d.fx_rate), items: d.items });
+      const res = await post('rates-save', { outlet_id: d.outlet_id, currency: d.currency, fx_rate: fxRate() || Number(d.fx_rate) || 1, items: d.items });
       rateCards[String(d.outlet_id)] = res.card;
       ui.rateDraft = null;
       ui.rateDirty = false;
@@ -1115,7 +1135,24 @@
         </div>`).join('')}
         <div class="folio-note">Username logins work immediately. Email users create their own account with the assigned email and confirm it before signing in.</div>
       </section>
-    </div>${brandingCard()}`;
+    </div>${exchangeCard()}${brandingCard()}`;
+  }
+
+  function exchangeCard() {
+    const alt = altCurrency();
+    if (!alt) return '';
+    return `<section class="card" style="margin-top:20px">
+      <div class="card-head"><div><h2>Currencies</h2><p>Bills and payments can be entered in ${esc(currency())} or ${esc(alt)}. ${esc(alt)} amounts are converted to ${esc(currency())} at this rate and the rate is printed on the record.</p></div>
+        ${brand.fx_updated_at ? `<span class="hint-line">Updated ${esc(fmtDateTime(brand.fx_updated_at))}</span>` : ''}</div>
+      ${brandError && !demo ? `<div class="rate-note warn-note">${icon('alert', 'sm')} ${esc(brandError)}</div>` : ''}
+      <form data-form="branding-save">
+        <div class="card-body fx-row">
+          <label class="inline-field fx-field">1 USD =<input class="input r num" name="fx_usd_mvr" type="number" step="0.0001" min="0.0001" max="999" value="${esc(brand.fx_usd_mvr ?? '')}" placeholder="15.42" required aria-label="MVR per 1 USD">MVR</label>
+          <button class="btn primary" type="submit">Save rate</button>
+          <div class="form-error"></div>
+        </div>
+      </form>
+    </section>`;
   }
 
   function brandingCard() {
@@ -1229,7 +1266,7 @@
   const field = (label, name, type = 'text', value = '', attrs = '', cls = '') =>
     `<label class="field ${cls}"><span>${label}</span><input name="${name}" type="${type}" value="${esc(value)}" ${attrs} required></label>`;
   const moneyField = (label, value = '', attrs = '', cls = '') =>
-    `<label class="field ${cls}"><span>${label}</span><div class="input-affix"><span class="affix">${esc(currency())}</span><input name="amount" type="number" inputmode="decimal" value="${esc(value)}" min="0.01" step="0.01" ${attrs} required></div></label>`;
+    `<label class="field ${cls}"><span>${label}</span><div class="input-affix"><span class="affix" data-affix>${esc(currency())}</span><input name="amount" type="number" inputmode="decimal" value="${esc(value)}" min="0.01" step="0.01" ${attrs} required></div></label>`;
   const passwordField = (label, cls = 'wide') => `<label class="field ${cls}"><span>${label} <span class="hint">· 12+ characters</span></span>
     <div class="pw-row"><input name="password" type="text" minlength="12" maxlength="72" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Type or generate">
     <button type="button" class="btn" data-act="gen-pass">${icon('refresh', 'sm')} Generate</button>
@@ -1245,6 +1282,19 @@
     const re = new RegExp('^' + prefix + '-(\\d+)$', 'i');
     const max = data.bills.reduce((m, b) => { const hit = re.exec(String(b.number || '')); return hit ? Math.max(m, parseInt(hit[1], 10)) : m; }, 0);
     return prefix + '-' + String(max + 1).padStart(3, '0');
+  }
+  const currencySelect = (name, value) => (billCurrencies().length < 2
+    ? `<input type="hidden" name="${name}" value="${esc(value)}">`
+    : `<label class="field"><span>Currency</span><select name="${name}" data-change="cur-switch">${billCurrencies().map((c) => `<option ${c === value ? 'selected' : ''}>${c}</option>`).join('')}</select></label>`);
+  const fxHint = () => (billCurrencies().length > 1 ? '<p class="hint-line wide fx-hint" data-fx-hint></p>' : '');
+  function updateFxHint(form) {
+    const hint = form.querySelector('[data-fx-hint]');
+    if (!hint) return;
+    const sel = form.querySelector('[name=bill_currency], [name=pay_currency]');
+    const cur = sel ? sel.value : currency();
+    const amt = Number(form.querySelector('[name=amount]')?.value) || 0;
+    hint.textContent = cur === currency() ? (altAmount(toCents(amt)) ? `≈ ${altAmount(toCents(amt))} at ${fxText()}` : '')
+      : `= ${currency()} ${money(toCents(r2(convert(amt, cur, currency()))))} at ${fxText()}. The ${cur} amount is printed on the record.`;
   }
   const methodField = () => `<label class="field"><span>Payment method</span><select name="method">${METHODS.map((m) => `<option>${m}</option>`).join('')}</select></label>`;
   const outletOptions = () => data.outlets.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
@@ -1344,10 +1394,12 @@
       const b = data.bills.find((x) => x.id === arg);
       const due = outstanding(b);
       return modal('Record payment', `${esc(b.number)} · ${esc(b.customer)}`,
-        `<div class="amount-hero" style="margin:0"><div><small>Outstanding on this invoice</small><div class="amt">${esc(currency())} ${money(due)}</div></div>${statusBadge(b)}</div>
-        <input type="hidden" name="bill_id" value="${esc(b.id)}">
+        `<div class="amount-hero" style="margin:0"><div><small>Outstanding on this invoice</small><div class="amt">${esc(currency())} ${money(due)}</div>${altAmount(due) ? `<small>≈ ${esc(altAmount(due))}</small>` : ''}</div>${statusBadge(b)}</div>
+        <input type="hidden" name="bill_id" value="${esc(b.id)}"><span hidden data-due="${due}"></span>
         <div class="form-grid">
           ${moneyField('Amount received', (due / 100).toFixed(2), `max="${due / 100}"`)}
+          ${currencySelect('pay_currency', currency())}
+          ${fxHint()}
           ${field('Payment date', 'date', 'date', today(), `min="${esc(b.date)}" max="${today()}"`)}
           ${methodField()}
           ${field('Receipt / reference', 'reference', 'text', '', 'maxlength="100" placeholder="e.g. RCPT-1024"')}
@@ -1359,11 +1411,13 @@
       const bills = billsForStay(arg);
       const due = sum(bills) - bills.reduce((t, b) => t + paidFor(b.id), 0);
       return modal('Collect guest payment', `${esc(s.guest_name)} · Room ${esc(s.room)} · ${esc(s.property)}`,
-        `<div class="amount-hero" style="margin:0"><div><small>Balance across ${bills.length} outlet charge${bills.length === 1 ? '' : 's'}</small><div class="amt">${esc(currency())} ${money(due)}</div></div></div>
+        `<div class="amount-hero" style="margin:0"><div><small>Balance across ${bills.length} outlet charge${bills.length === 1 ? '' : 's'}</small><div class="amt">${esc(currency())} ${money(due)}</div>${altAmount(due) ? `<small>≈ ${esc(altAmount(due))}</small>` : ''}</div></div>
         <p class="kpi-foot">Full or partial payments are allocated to the oldest unpaid charges first.</p>
-        <input type="hidden" name="stay_id" value="${esc(arg)}">
+        <input type="hidden" name="stay_id" value="${esc(arg)}"><span hidden data-due="${due}"></span>
         <div class="form-grid">
           ${moneyField('Amount received', (due / 100).toFixed(2), `max="${due / 100}"`)}
+          ${currencySelect('pay_currency', currency())}
+          ${fxHint()}
           ${field('Payment date', 'date', 'date', today(), `max="${today()}"`)}
           ${methodField()}
           ${field('Receipt / reference', 'reference', 'text', '', 'maxlength="100" placeholder="e.g. RCPT-1024"')}
@@ -1383,7 +1437,9 @@
     const card = cardFor(oid);
     if (!card) {
       return `<div class="form-grid">
-        ${moneyField('Amount', '', 'max="100000000"', 'wide')}
+        ${moneyField('Amount', '', 'max="100000000"', billCurrencies().length > 1 ? '' : 'wide')}
+        ${currencySelect('bill_currency', currency())}
+        ${fxHint()}
         <label class="field wide"><span>Description</span><textarea name="notes" required maxlength="2000" rows="3" placeholder="e.g. Dinner for two – set menu&#10;Each line appears on the invoice"></textarea></label>
         <div class="alert ${rateError ? 'warn' : 'info'} wide">${icon('tag', 'sm')}<span class="grow">${rateError
           ? 'Item dropdown unavailable: ' + esc(rateError)
@@ -1391,9 +1447,13 @@
           <button type="button" class="link" data-act="goto-rates" data-arg="${esc(oid)}">Open rate card</button></div>
       </div>`;
     }
-    const cur = cardCurrency(card);
-    return `<div class="bill-builder" data-builder data-outlet="${esc(oid)}">
-      <div class="bb-title"><strong>Items</strong><span class="hint-line">From the ${esc(outletName(oid))} rate card · prices in ${esc(cur)}</span></div>
+    const listCur = cardCurrency(card);
+    const choices = billCurrencies();
+    const cur = choices.includes(listCur) ? listCur : currency();
+    return `<div class="bill-builder" data-builder data-outlet="${esc(oid)}" data-cur="${esc(cur)}">
+      <div class="bb-title"><strong>Items</strong>
+        ${choices.length > 1 ? `<label class="inline-field">Bill in <select class="input" data-change="bb-cur" aria-label="Bill currency" style="width:auto">${choices.map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select></label>` : ''}
+        <span class="hint-line">From the ${esc(outletName(oid))} rate card · list prices in ${esc(listCur)}</span></div>
       <div class="bb-row bb-labels"><span>Item</span><span class="r">Qty</span><span class="r">Unit (${esc(cur)})</span><span class="r">Total</span><span></span></div>
       <div id="bbRows">${bbRowHtml(card)}</div>
       <button type="button" class="btn sm" data-act="bi-add">${icon('plus', 'sm')} Add item</button>
@@ -1409,7 +1469,7 @@
     const groups = new Map();
     card.items.forEach((it, i) => { const g = it.category || 'Other'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push([it, i]); });
     return '<option value="">Choose an item…</option>'
-      + [...groups].map(([g, list]) => `<optgroup label="${esc(g)}">${list.map(([it, i]) => `<option value="${i}">${esc(it.name)} — ${money(toCents(it.price))}</option>`).join('')}</optgroup>`).join('')
+      + [...groups].map(([g, list]) => `<optgroup label="${esc(g)}">${list.map(([it, i]) => `<option value="${i}">${esc(it.name)} — ${esc(cardCurrency(card))} ${money(toCents(it.price))}</option>`).join('')}</optgroup>`).join('')
       + '<option value="custom">Other / custom item…</option>';
   }
   const bbRowHtml = (card) => `<div class="bb-row">
@@ -1421,7 +1481,7 @@
     </div>`;
   function bbState(builder) {
     const card = cardFor(builder.dataset.outlet);
-    const cur = cardCurrency(card), fx = cardFx(card);
+    const cur = builder.dataset.cur || cardCurrency(card), rate = cardRate(card);
     const rows = [...builder.querySelectorAll('#bbRows .bb-row')].map((row) => {
       const sel = row.querySelector('select').value;
       const custom = row.querySelector('.bb-custom');
@@ -1435,7 +1495,7 @@
     const pct = Math.min(100, Math.max(0, Number(builder.querySelector('[data-bb=discount]').value) || 0));
     const discount = Math.round(subtotal * pct) / 100;
     const net = Math.round((subtotal - discount) * 100) / 100;
-    return { card, cur, fx, rows, used, subtotal, pct, discount, net, charged: Math.round(net * fx * 100) / 100 };
+    return { card, cur, rate, rows, used, subtotal, pct, discount, net, charged: r2(convert(net, cur, currency(), rate)) };
   }
   function bbRecalc(builder) {
     const st = bbState(builder);
@@ -1445,7 +1505,7 @@
     builder.querySelector('#bbTotals').innerHTML = `
       <div><span>Subtotal</span><span>${esc(st.cur)} ${money(toCents(st.subtotal))}</span></div>
       ${st.pct ? `<div><span>Discount ${st.pct}%</span><span>− ${esc(st.cur)} ${money(toCents(st.discount))}</span></div>` : ''}
-      ${foreign ? `<div><span>Total</span><span>${esc(st.cur)} ${money(toCents(st.net))}</span></div><div class="bb-fx"><span>at 1 ${esc(st.cur)} = ${esc(st.fx)} ${esc(currency())}</span></div>` : ''}
+      ${foreign ? `<div><span>Total</span><span>${esc(st.cur)} ${money(toCents(st.net))}</span></div><div class="bb-fx"><span>at ${esc(fxText(st.rate))}</span></div>` : ''}
       <div class="grand"><span>Charge to guest</span><span>${esc(currency())} ${money(toCents(st.charged))}</span></div>`;
   }
   function bbCompose(form) {
@@ -1458,7 +1518,7 @@
     if (!(st.charged > 0)) return 'The bill total must be more than zero.';
     const lines = st.used.map((r) => `${r.qty} × ${r.name.replace(/\s*@\s*/g, ' at ')} @ ${st.cur} ${r.price.toFixed(2)}`);
     if (st.pct) lines.push(`1 × Discount ${st.pct}% @ ${st.cur} -${st.discount.toFixed(2)}`);
-    if (st.cur !== currency()) lines.push(`Exchange rate: 1 ${st.cur} = ${st.fx} ${currency()}`);
+    if (st.cur !== currency()) lines.push(fxLine(st.rate));
     const extra = form.querySelector('[name=notes]').value.trim();
     const notes = lines.join('\n') + (extra ? '\n' + extra : '');
     if (notes.length > 2000) return 'Too many items for one bill. Split it into two bills.';
@@ -1491,10 +1551,34 @@
         }
         Object.assign(values, composed);
       }
+      const bc = values.bill_currency || currency();
+      delete values.bill_currency;
+      if (!form.querySelector('[data-builder]') && bc !== currency()) {
+        const amt = Number(values.amount), conv = r2(convert(amt, bc, currency()));
+        if (!(conv > 0)) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Set the exchange rate in Settings before billing in ${esc(bc)}.</span></div>`; return; }
+        const lines = String(values.notes || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        values.notes = [`1 × ${(lines[0] || 'Outlet charges').replace(/\s*@\s*/g, ' at ')} @ ${bc} ${amt.toFixed(2)}`, fxLine(), ...lines.slice(1)].join('\n');
+        values.amount = conv.toFixed(2);
+      }
       values.number = String(values.number || '').trim();
       if (data.bills.some((b) => b.outlet_id === values.outlet_id && String(b.number).toLowerCase() === values.number.toLowerCase())) {
         errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Bill number ${esc(values.number)} already exists for this outlet.</span></div>`;
         return;
+      }
+    }
+    if (name === 'payments' || name === 'settle') {
+      const pc = values.pay_currency || currency();
+      delete values.pay_currency;
+      if (pc !== currency()) {
+        const amt = Number(values.amount);
+        let conv = r2(convert(amt, pc, currency()));
+        const dueEl = form.querySelector('[data-due]');
+        const dueMajor = dueEl ? Number(dueEl.dataset.due) / 100 : null;
+        if (dueMajor !== null && Math.abs(conv - dueMajor) < 0.02) conv = dueMajor; // full payment: absorb rounding
+        if (!(conv > 0)) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Set the exchange rate in Settings before taking ${esc(pc)}.</span></div>`; return; }
+        if (dueMajor !== null && conv > dueMajor) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>That is more than the balance (${esc(currency())} ${money(toCents(dueMajor))}).</span></div>`; return; }
+        values.amount = conv.toFixed(2);
+        values.reference = `${values.reference} · paid ${pc} ${amt.toFixed(2)} at ${fxText()}`.slice(0, 100);
       }
     }
     if (!requireLive()) return;
@@ -1503,7 +1587,7 @@
       await post(name, values);
       if (name !== 'settings') closeOverlay();
       await load();
-      toast({ settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.' }[name] || 'Saved to your workspace.');
+      toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.' }[name] || 'Saved to your workspace.');
     } catch (err) {
       errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
       btn.disabled = false;
@@ -1543,21 +1627,24 @@
       ${!b.stay_id && isAdmin() ? `<div class="alert warn doc-alert">${icon('link', 'sm')}<span class="grow">This invoice isn’t linked to a guest stay.</span><button class="link" data-act="form" data-arg="link" data-arg2="${esc(id)}">Assign guest</button></div>` : ''}
       <article class="invoice-doc" ${docStyle()} aria-label="Invoice ${esc(b.number)}">
         ${status === 'Paid' ? '<div class="doc-stamp">Paid</div>' : ''}
-        <header class="inv-head">
-          <div class="inv-from">
-            <div class="inv-logo">${esc(initials(o.name))}</div>
-            <div>
-              <h2>${esc(o.name)}</h2>
+        <header class="lh">
+          <div class="lh-top">
+            <div class="lh-identity">${brandMark('lh-mark')}${brand.logo ? '' : `<div class="lh-name">${esc(legalName())}</div>`}</div>
+            <div class="lh-doc"><h1>Invoice</h1><span class="lh-sub">${esc(o.name)}</span></div>
+          </div>
+          <div class="lh-bottom">
+            <div class="lh-from">
+              <strong>${esc(o.name)}</strong>
               <p>${esc([o.category, o.location].filter(Boolean).join(' · '))}</p>
               <p>An outlet of ${esc(legalName())}</p>
+              ${brandContacts() ? `<p>${brandContacts()}</p>` : ''}
+              ${brand.tax_id ? `<p>Reg. / Tax no. ${esc(brand.tax_id)}</p>` : ''}
             </div>
-          </div>
-          <div class="inv-title">
-            <h1>Invoice</h1>
-            <dl>
+            <dl class="lh-meta">
               <div><dt>Invoice no.</dt><dd class="mono">${esc(b.number)}</dd></div>
               <div><dt>Invoice date</dt><dd>${fmtDate(b.date)}</dd></div>
               <div><dt>Due date</dt><dd>${fmtDate(b.due)}</dd></div>
+              <div><dt>Billed in</dt><dd>${esc(foreign ? itemCur : currency())}</dd></div>
             </dl>
           </div>
         </header>
@@ -1587,11 +1674,12 @@
           </div>
           <div class="inv-totals">
             ${foreign ? `<div><span>Subtotal (${esc(itemCur)})</span><span>${money(itemTotal)}</span></div>
-            <div class="inv-fx"><span>Exchange rate</span><span>1 ${esc(itemCur)} = ${esc(parsed.fx?.rate ?? '—')} ${esc(currency())}</span></div>
+            <div class="inv-fx"><span>Exchange rate</span><span>${parsed.fx ? esc('1 ' + parsed.fx.from + ' = ' + parsed.fx.rate + ' ' + parsed.fx.to) : '—'}</span></div>
             <div><span>Invoice total (${esc(currency())})</span><span>${money(b.amount)}</span></div>`
             : `<div><span>Subtotal</span><span>${money(b.amount)}</span></div>`}
             <div><span>Payments received</span><span>− ${money(paid)}</span></div>
             <div class="grand"><span>Balance due</span><span>${esc(currency())} ${money(due)}</span></div>
+            ${altAmount(due) ? `<div class="alt-due"><span>In ${esc(altCurrency())} at ${esc(fxText())}</span><span>${esc(altAmount(due))}</span></div>` : ''}
           </div>
         </div>
         <footer class="inv-foot">
@@ -1728,7 +1816,7 @@
     brand = {
       legal_name: 'Cozy Hospitality Pvt Ltd', tagline: 'Island guest houses & experiences', color: '#0F6E6A',
       address: 'Cozy Nest, Hithadhoo Magu\nFuvahmulah 18020, Maldives', phone: '+960 777 0000', email: 'accounts@cozy.example', website: 'www.cozy.example',
-      tax_id: 'GST 1000000GST501', payment_info: 'Bank of Maldives · Cozy Hospitality Pvt Ltd · USD acc. 7730000000000 · SWIFT MALBMVMV\nVisa, Mastercard and cash accepted at the front office.',
+      tax_id: 'GST 1000000GST501', fx_usd_mvr: 15.42, payment_info: 'Bank of Maldives · Cozy Hospitality Pvt Ltd · USD acc. 7730000000000 · SWIFT MALBMVMV\nVisa, Mastercard and cash accepted at the front office.',
       terms: 'All prices include 10% service charge and applicable taxes. Payment is due at checkout. Thank you for staying with us.',
     };
     ui.rateDraft = null; ui.rateDirty = false; ui.rateOutlet = null;
@@ -1824,7 +1912,7 @@
     },
     export: exportCsv,
     close: closeOverlay,
-    form: (arg, el) => { openForm(arg, el.dataset.arg2); const bld = document.querySelector('#modal [data-builder]'); if (bld) bbRecalc(bld); },
+    form: (arg, el) => { openForm(arg, el.dataset.arg2); const bld = document.querySelector('#modal [data-builder]'); if (bld) bbRecalc(bld); const f = document.querySelector('#modal form'); if (f) updateFxHint(f); },
     invoice: openInvoice,
     approve,
     guest: (id) => { ui.selectedStay = id; render(); window.scrollTo(0, 0); },
@@ -1894,6 +1982,7 @@
   });
 
   document.addEventListener('input', (e) => {
+    if (e.target.name === 'amount' && e.target.form?.querySelector('[data-fx-hint]')) updateFxHint(e.target.form);
     const rf = e.target.dataset.rateField;
     if (rf && ui.rateDraft) {
       const it = ui.rateDraft.items[Number(e.target.dataset.rateIdx)];
@@ -1944,13 +2033,41 @@
       if (ui.rateDirty && !confirm('Discard unsaved changes to this rate card?')) { e.target.value = ui.rateOutlet; return; }
       ui.rateOutlet = e.target.value; ui.rateDraft = null; ui.rateDirty = false; ui.rateQuery = ''; render(); return;
     }
+    if (e.target.dataset.change === 'cur-switch') {
+      const form = e.target.form, cur = e.target.value, prev = e.target.dataset.prev || currency();
+      e.target.dataset.prev = cur;
+      form.querySelectorAll('[data-affix]').forEach((a) => { a.textContent = cur; });
+      const amount = form.querySelector('[name=amount]'), dueEl = form.querySelector('[data-due]');
+      if (amount && dueEl) {
+        const due = Number(dueEl.dataset.due) / 100, m = r2(convert(due, currency(), cur));
+        amount.max = m; amount.value = m.toFixed(2);
+      } else if (amount && amount.value) {
+        amount.value = r2(convert(Number(amount.value), prev, cur)).toFixed(2);
+      }
+      updateFxHint(form);
+      return;
+    }
+    if (e.target.dataset.change === 'bb-cur') {
+      const builder = e.target.closest('[data-builder]'), card = cardFor(builder.dataset.outlet);
+      const prev = builder.dataset.cur, cur = e.target.value, rate = cardRate(card);
+      builder.dataset.cur = cur;
+      builder.querySelectorAll('#bbRows .bb-row').forEach((row) => {
+        const sel = row.querySelector('select').value, price = row.querySelector('[data-bb=price]');
+        if (sel !== '' && sel !== 'custom') price.value = r2(convert(Number(card.items[Number(sel)].price), cardCurrency(card), cur, rate)).toFixed(2);
+        else if (price.value) price.value = r2(convert(Number(price.value), prev, cur, rate)).toFixed(2);
+      });
+      const unit = builder.querySelector('.bb-labels span:nth-child(3)');
+      if (unit) unit.textContent = `Unit (${cur})`;
+      bbRecalc(builder);
+      return;
+    }
     if (e.target.dataset.change === 'bi-item') {
       const row = e.target.closest('.bb-row'), builder = e.target.closest('[data-builder]');
       const card = cardFor(builder.dataset.outlet), v = e.target.value;
       const custom = row.querySelector('.bb-custom'), price = row.querySelector('[data-bb=price]');
       custom.hidden = v !== 'custom';
       if (v === 'custom') { price.value = ''; custom.focus(); }
-      else if (v !== '') price.value = Number(card.items[Number(v)].price).toFixed(2);
+      else if (v !== '') price.value = r2(convert(Number(card.items[Number(v)].price), cardCurrency(card), builder.dataset.cur || cardCurrency(card), cardRate(card))).toFixed(2);
       if (v !== '' && row === builder.querySelector('#bbRows .bb-row:last-child')) {
         builder.querySelector('#bbRows').insertAdjacentHTML('beforeend', bbRowHtml(card));
       }

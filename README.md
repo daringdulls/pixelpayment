@@ -56,5 +56,14 @@ signature lines) and on invoices.
 
 **One-time setup:** run `supabase/migrations/20261114180000_pixel_branding.sql` in the Supabase SQL editor.
 
+## Two currencies (USD and MVR)
+Head office sets the rate in **Settings → Currencies** (MVR per 1 USD). Then:
+- Bills can be entered in USD or MVR (typed in, or built from a rate card with **Bill in**). The bill is posted in the
+  workspace currency; the original currency lines and the rate are kept in the description and printed on the invoice.
+- Payments (single invoice or a guest's whole folio) can be taken in USD or MVR; the receipt reference records the
+  amount paid and the rate. A full payment absorbs rounding so the balance closes exactly.
+- Folios and invoices show the balance due in both currencies.
+The rate is stored with the branding row (`pixel_branding`); saving it does not change any other branding field.
+
 ## API used by the frontend
 `GET /api/config`, `GET /api/data`, `GET /api/rates`, `GET /api/branding`, `POST /api/{branding-save|rates-save|staff-create|staff-reset|stays|outlets|bills|members|payments|settle|settings|approve|approve-stay|checkout|link-bill}`

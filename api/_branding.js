@@ -44,22 +44,38 @@ export async function branding(req, res, path, { endpoint, key }) {
     if (path === '/api/branding-save') {
       if (ws.member?.role !== 'admin') return res.status(403).json({ error: 'Only head office administrators can change branding.' });
       const b = req.body || {};
-      const brand = {};
+      // Merge with what is stored, so partial forms (e.g. exchange rate only) keep the other fields.
+      const cur = await rest('?select=brand&id=eq.default');
+      const curBody = await cur.json().catch(() => null);
+      if (!cur.ok) return res.status(notSetUp(cur, curBody) ? 503 : 502).json({ error: notSetUp(cur, curBody) ? setupError : 'Could not load branding.' });
+      const brand = { ...((curBody && curBody[0] && curBody[0].brand) || {}) };
       for (const [field, max] of Object.entries(TEXT_LIMITS)) {
+        if (!(field in b)) continue;
         const v = String(b[field] ?? '').trim();
         if (v.length > max) return res.status(400).json({ error: `${field.replace('_', ' ')} is too long (max ${max} characters).` });
         brand[field] = v;
       }
-      const color = String(b.color || '').trim();
-      if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) return res.status(400).json({ error: 'Brand colour must be a hex colour like #0E6B55.' });
-      brand.color = color;
-      const logo = String(b.logo || '');
-      if (logo) {
-        const okData = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(logo);
-        if (!okData) return res.status(400).json({ error: 'The logo must be a PNG, JPG or WebP image.' });
-        if (logo.length > MAX_LOGO) return res.status(400).json({ error: 'The logo is too large. Use an image under about 200 KB.' });
+      if ('color' in b) {
+        const color = String(b.color || '').trim();
+        if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) return res.status(400).json({ error: 'Brand colour must be a hex colour like #0E6B55.' });
+        brand.color = color;
       }
-      brand.logo = logo;
+      if ('logo' in b) {
+        const logo = String(b.logo || '');
+        if (logo) {
+          const okData = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(logo);
+          if (!okData) return res.status(400).json({ error: 'The logo must be a PNG, JPG or WebP image.' });
+          if (logo.length > MAX_LOGO) return res.status(400).json({ error: 'The logo is too large. Use an image under about 200 KB.' });
+        }
+        brand.logo = logo;
+      }
+      if ('fx_usd_mvr' in b) {
+        const raw = String(b.fx_usd_mvr ?? '').trim();
+        const fx = Number(raw);
+        if (raw && !(fx > 0 && fx < 1000)) return res.status(400).json({ error: 'Enter the exchange rate as MVR per 1 USD, e.g. 15.42.' });
+        brand.fx_usd_mvr = raw ? Math.round(fx * 10000) / 10000 : null;
+        brand.fx_updated_at = new Date().toISOString();
+      }
       const row = { id: 'default', brand, updated_at: new Date().toISOString(), updated_by: ws.email || null };
       const r = await rest('?on_conflict=id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(row) });
       if (!r.ok) {
