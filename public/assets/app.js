@@ -960,7 +960,8 @@
     const rows = d.items.map((it, idx) => ({ it, idx })).filter(({ it }) => !q || (it.name + ' ' + it.category).toLowerCase().includes(q));
     if (!rows.length) {
       return `<tr><td colspan="4">${d.items.length ? emptyState('search', 'No matching items', 'Try another search.')
-        : emptyState('tag', 'No prices yet', 'Add items one by one, or copy your price list from Google Sheets and use “Paste from sheet”.', `<button class="btn primary" data-act="rate-paste">${icon('copy', 'sm')} Paste from sheet</button>`)}</td></tr>`;
+        : emptyState('tag', 'No prices yet', 'Add items one by one, or copy your price list from Google Sheets and use “Paste from sheet”.',
+            `<div class="btn-row" style="justify-content:center">${/scuba|dive/i.test(outletName(d.outlet_id)) ? `<button class="btn primary" data-act="rate-load-scuba">${icon('download', 'sm')} Load Cozy Scuba Club price list (${SCUBA_PRICES.length} items)</button>` : ''}<button class="btn ${/scuba|dive/i.test(outletName(d.outlet_id)) ? '' : 'primary'}" data-act="rate-paste">${icon('copy', 'sm')} Paste from sheet</button></div>`)}</td></tr>`;
     }
     return rows.map(({ it, idx }) => `<tr>
       <td><input class="input cell" list="rateCats" data-rate-idx="${idx}" data-rate-field="category" value="${esc(it.category || '')}" placeholder="e.g. Fun dives" maxlength="60" aria-label="Category"></td>
@@ -1276,7 +1277,10 @@
       return `<div class="form-grid">
         ${moneyField('Amount', '', 'max="100000000"', 'wide')}
         <label class="field wide"><span>Description</span><textarea name="notes" required maxlength="2000" rows="3" placeholder="e.g. Dinner for two – set menu&#10;Each line appears on the invoice"></textarea></label>
-        ${isAdmin() || data.outlets.length === 1 ? `<p class="hint-line wide">Tip: set up a rate card for this outlet to pick items from a price list instead.</p>` : ''}
+        <div class="alert ${rateError ? 'warn' : 'info'} wide">${icon('tag', 'sm')}<span class="grow">${rateError
+          ? 'Item dropdown unavailable: ' + esc(rateError)
+          : `${esc(outletName(oid))} has no prices on its rate card yet. Add them once and you can pick items from a dropdown here.`}</span>
+          <button type="button" class="link" data-act="goto-rates" data-arg="${esc(oid)}">Open rate card</button></div>
       </div>`;
     }
     const cur = cardCurrency(card);
@@ -1613,8 +1617,7 @@
     applyDemoRole();
   }
 
-  function demoRateCards() {
-    const scuba = [
+  const SCUBA_PRICES = [
       ['Fun dives', 'Fun Dive 1', 81], ['Fun dives', 'Fun Dive 2', 71], ['Fun dives', 'Fun Dive 3-6', 76], ['Fun dives', 'Fun Dive 7', 41],
       ['Fun dives', 'Fun Dive 8-12', 71], ['Fun dives', 'Fun Dive 13', 6], ['Fun dives', 'Fun Dive 14-20', 66], ['Fun dives', 'Fun Dive 21', -39], ['Fun dives', 'Fun Dive 21+', 61],
       ['Try dives & refreshers', 'DSD', 100], ['Try dives & refreshers', 'DS (not completed DSD)', 50], ['Try dives & refreshers', '2nd DSD', 81],
@@ -1628,7 +1631,10 @@
       ['Packages', 'Exploring package 7N/15D', 2208], ['Packages', 'Advance package 8N/18D', 2541], ['Packages', 'Super package 9N/12D', 2874],
       ['Dive insurance', 'Dive insurance – 1 day', 18], ['Dive insurance', 'Dive insurance – 3 days', 23], ['Dive insurance', 'Dive insurance – 5 days', 30],
       ['Dive insurance', 'Dive insurance – 7 days', 35], ['Dive insurance', 'Dive insurance – 10 days', 40], ['Dive insurance', 'Dive insurance – 14 days', 55],
-    ];
+  ];
+
+  function demoRateCards() {
+    const scuba = SCUBA_PRICES;
     const deck = [['Food', 'Sunset set menu', 620], ['Food', 'Lunch', 270], ['Drinks', 'Fresh juice', 75], ['Drinks', 'Soft drink', 45], ['Drinks', 'Mocktail', 150]];
     const mkItems = (list) => list.map(([category, name, price]) => ({ id: rid(), category, name, price }));
     return {
@@ -1725,6 +1731,15 @@
     'rate-del': (idx) => { ui.rateDraft.items.splice(Number(idx), 1); ui.rateDirty = true; render(); },
     'rate-reset': () => { ui.rateDraft = null; ui.rateDirty = false; render(); },
     'rate-save': () => saveRates(),
+    'goto-rates': (oid) => { closeOverlay(); ui.rateOutlet = oid; ui.rateDraft = null; ui.rateDirty = false; navigate('Rates'); },
+    'rate-load-scuba': () => {
+      const d = ui.rateDraft;
+      d.items = SCUBA_PRICES.map(([category, name, price]) => ({ id: rid(), category, name, price }));
+      d.currency = 'USD';
+      if (currency() !== 'USD' && !(Number(d.fx_rate) > 1)) d.fx_rate = 15.42;
+      ui.rateDirty = true; ui.rateQuery = ''; render();
+      toast(`${d.items.length} Cozy Scuba Club prices loaded. Check them, then click Save rate card.`);
+    },
     'rate-paste': () => modal('Paste from sheet', 'Copy rows from Google Sheets or Excel (item and price columns) and paste them below.',
       `<label class="field"><span>Rows</span><textarea name="paste" rows="9" class="mono-area" placeholder="Fun Dive 1&#9;$ 81.00&#10;Fun Dive 2&#9;$ 71.00&#10;Equipment charge mask and Fins&#9;$ 5.00" required></textarea></label>
       <p class="hint-line">Columns can be <b>Item · Price</b> or <b>Category · Item · Price</b>. If there are two price columns, the last one is used. Prices like $1,392.00 and (39.00) are understood.</p>
