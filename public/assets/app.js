@@ -102,7 +102,7 @@
     return Array.from(bytes, (b) => chars[b % chars.length]).join('');
   }
   const ui = {
-    page: 'Guests',
+    page: null,
     search: '',
     outletFilter: '',
     statusFilter: '',
@@ -260,7 +260,17 @@
     if (sb) await sb.auth.signOut();
     demo = false;
     liveData = null;
+    ui.page = null;
     renderAuth();
+  }
+
+  // Outlet staff only ever see their own outlet's bills. The backend enforces this; this is a second safeguard.
+  function scopeToRole(d) {
+    const m = d.member || {};
+    if (m.role === 'admin' || !m.outlet_id) return d;
+    const bills = (d.bills || []).filter((b) => b.outlet_id === m.outlet_id);
+    const ids = new Set(bills.map((b) => b.id));
+    return { ...d, bills, payments: (d.payments || []).filter((p) => ids.has(p.bill_id)), outlets: (d.outlets || []).filter((o) => o.id === m.outlet_id) };
   }
 
   async function load() {
@@ -268,8 +278,8 @@
       const res = await fetch('/api/data');
       const body = await res.json();
       if (!res.ok) throw Object.assign(new Error(body.error), { status: res.status });
-      liveData = body;
-      if (!demo) data = body;
+      liveData = scopeToRole(body);
+      if (!demo) data = liveData;
       render();
     } catch (err) {
       if (err.status === 401) return renderAuth();
@@ -291,34 +301,52 @@
   /* ------------------------------------------------------------------ *
    * Shell
    * ------------------------------------------------------------------ */
-  const NAV = [
-    { group: 'Front office', items: [['Guests', 'guests']] },
-    { group: 'Finance', items: [['Overview', 'overview'], ['Invoices', 'invoices'], ['Payments', 'payments']] },
-    { group: 'Operations', items: [['Outlets', 'outlets'], ['Activity', 'activity']] },
-    { group: 'Administration', items: [['Settings', 'settings']], admin: true },
+  const NAV_ADMIN = [
+    { group: 'Overview', items: [['Overview', 'overview', 'Dashboard']] },
+    { group: 'Front office', items: [['Guests', 'guests', 'Guests & folios']] },
+    { group: 'Finance', items: [['Invoices', 'invoices', 'Invoices'], ['Payments', 'payments', 'Payments']] },
+    { group: 'Operations', items: [['Outlets', 'outlets', 'Outlets'], ['Activity', 'activity', 'Activity log']] },
+    { group: 'Administration', items: [['Settings', 'settings', 'Settings']] },
   ];
+  const NAV_OUTLET = [
+    { group: 'My outlet', items: [['Invoices', 'invoices', 'My bills'], ['Guests', 'guests', 'Guest lookup'], ['Payments', 'payments', 'Collections']] },
+  ];
+  const navFor = () => (isAdmin() ? NAV_ADMIN : NAV_OUTLET);
+  const allowedPages = () => navFor().flatMap((g) => g.items.map((i) => i[0]));
+  const pageLabel = (p) => navFor().flatMap((g) => g.items).find((i) => i[0] === p)?.[2] || p;
+  const myOutletName = () => data.outlets[0]?.name || 'your outlet';
 
-  const PAGE_COPY = {
-    Guests: ['Guests & folios', 'Every in-house guest with their combined charges from all outlets.'],
-    Overview: ['Overview', 'Invoicing and collections across every outlet.'],
-    Invoices: ['Invoices', 'Outlet charges ready for review and central collection.'],
-    Payments: ['Payments', 'Receipts collected by the front office, with their invoice allocations.'],
-    Outlets: ['Outlets', 'Billing performance and outstanding balances by outlet.'],
-    Activity: ['Activity log', 'An audit trail of submissions, approvals and collections.'],
-    Settings: ['Settings', 'Organisation details and staff access.'],
-  };
+  function pageCopy(p) {
+    if (!isAdmin()) {
+      return ({
+        Invoices: ['My bills', `Every bill ${esc(myOutletName())} has posted to guest folios. Only your outlet’s bills are shown.`],
+        Guests: ['Guest lookup', 'Find an in-house guest to post a bill. Balances show your outlet’s charges only.'],
+        Payments: ['Collections', `Payments the front office has collected against ${esc(myOutletName())} bills.`],
+      })[p];
+    }
+    return ({
+      Overview: ['Dashboard', 'Billing, collections and outlet performance across the business.'],
+      Guests: ['Guests & folios', 'Every in-house guest with their combined charges from all outlets.'],
+      Invoices: ['Invoices', 'Outlet bills ready for review and central collection.'],
+      Payments: ['Payments', 'Receipts collected by the front office, with their invoice allocations.'],
+      Outlets: ['Outlets', 'Billing performance and outstanding balances by outlet.'],
+      Activity: ['Activity log', 'An audit trail of submissions, approvals and collections.'],
+      Settings: ['Settings', 'Organisation details and staff access.'],
+    })[p];
+  }
 
   function render() {
     document.body.classList.add('signed-in');
+    if (!ui.page || !allowedPages().includes(ui.page)) ui.page = isAdmin() ? 'Overview' : 'Invoices';
     const pending = data.bills.filter((b) => b.status === 'pending').length;
     const myOutlet = !isAdmin() && data.outlets.find((o) => o.id === data.member?.outlet_id);
     const who = isAdmin() ? 'Head office' : myOutlet ? myOutlet.name + ' staff' : 'Outlet staff';
-    const nav = NAV.filter((g) => !g.admin || isAdmin()).map((g) => `
+    const nav = navFor().map((g) => `
       <div class="nav-group">
         <div class="nav-label">${g.group}</div>
-        ${g.items.map(([name, ic]) => `
+        ${g.items.map(([name, ic, label]) => `
           <button class="nav-item ${ui.page === name ? 'active' : ''}" data-act="nav" data-arg="${name}" ${ui.page === name ? 'aria-current="page"' : ''}>
-            ${icon(ic)}<span>${name}</span>${name === 'Invoices' && pending ? `<span class="count" title="${pending} awaiting review">${pending}</span>` : ''}
+            ${icon(ic)}<span>${label}</span>${name === 'Invoices' && isAdmin() && pending ? `<span class="count" title="${pending} awaiting review">${pending}</span>` : ''}
           </button>`).join('')}
       </div>`).join('');
 
@@ -341,7 +369,7 @@
           <header class="topbar">
             <div class="crumbs">
               <button class="btn ghost icon menu-btn" data-act="menu" aria-label="Open navigation">${icon('menu')}</button>
-              <span>${esc(data.settings.company)}</span>${icon('chevronRight', 'sm')}<strong>${ui.page}</strong>
+              <span>${esc(data.settings.company)}</span>${icon('chevronRight', 'sm')}<strong>${pageLabel(ui.page)}</strong>
             </div>
             <div class="topbar-right">
               <span class="date">${new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ })}</span>
@@ -366,19 +394,20 @@
 
   function pageHeader() {
     if (ui.page === 'Guests' && ui.selectedStay) return '';
-    const [title, sub] = PAGE_COPY[ui.page];
+    const [title, sub] = pageCopy(ui.page);
+    const newBill = `<button class="btn primary" data-act="form" data-arg="bill">${icon('plus', 'sm')} ${isAdmin() ? 'New invoice' : 'New bill'}</button>`;
     const actions = [];
     if (['Overview', 'Invoices', 'Payments'].includes(ui.page)) actions.push(`<button class="btn" data-act="export">${icon('download', 'sm')} Export CSV</button>`);
     if (ui.page === 'Guests') {
       actions.push(`<button class="btn" data-act="refresh">${icon('refresh', 'sm')} Refresh</button>`);
-      if (isAdmin()) actions.push(`<button class="btn primary" data-act="form" data-arg="stay">${icon('userPlus', 'sm')} Register guest</button>`);
-      else actions.push(`<button class="btn primary" data-act="form" data-arg="bill">${icon('plus', 'sm')} New invoice</button>`);
-    } else if (ui.page === 'Outlets' && isAdmin()) {
+      actions.push(isAdmin() ? `<button class="btn primary" data-act="form" data-arg="stay">${icon('userPlus', 'sm')} Register guest</button>` : newBill);
+    } else if (ui.page === 'Outlets') {
       actions.push(`<button class="btn primary" data-act="form" data-arg="outlet">${icon('plus', 'sm')} Add outlet</button>`);
-    } else if (['Overview', 'Invoices', 'Payments', 'Outlets'].includes(ui.page)) {
-      actions.push(`<button class="btn primary" data-act="form" data-arg="bill">${icon('plus', 'sm')} New invoice</button>`);
+    } else if (['Overview', 'Invoices', 'Payments'].includes(ui.page)) {
+      actions.push(newBill);
     }
-    return `<div class="page-head"><div><h1>${title}</h1><p>${sub}</p></div><div class="page-actions">${actions.join('')}</div></div>`;
+    const eyebrow = isAdmin() ? 'Head office' : esc(myOutletName());
+    return `<div class="page-head"><div><div class="page-eyebrow">${eyebrow}</div><h1>${title}</h1><p>${sub}</p></div><div class="page-actions">${actions.join('')}</div></div>`;
   }
 
   function pageBody() {
@@ -561,44 +590,58 @@
   function overviewView() {
     const invoiced = sum(data.bills);
     const collected = sum(data.payments);
+    const open = data.bills.filter((b) => outstanding(b) > 0);
     const overdueBills = data.bills.filter((b) => billStatus(b) === 'Overdue');
     const overdue = overdueBills.reduce((t, b) => t + outstanding(b), 0);
-    const open = data.bills.filter((b) => outstanding(b) > 0);
+    const pendingBills = data.bills.filter((b) => b.status === 'pending');
+    const todays = data.bills.filter((b) => b.date === today());
+    const inHouse = stays().filter((s) => s.status === 'active').length;
     const recent = data.bills.slice().sort(byNewest).slice(0, 6);
+    const attention = [...pendingBills.map((b) => ({ b, kind: 'pending' })), ...overdueBills.map((b) => ({ b, kind: 'overdue' }))];
 
-    const outletRows = data.outlets.map((o) => {
+    const rows = data.outlets.map((o) => {
       const bills = data.bills.filter((b) => b.outlet_id === o.id);
       const t = sum(bills), p = bills.reduce((a, b) => a + paidFor(b.id), 0);
-      return { o, bills, t, p, out: t - p };
-    }).sort((a, b) => b.out - a.out);
+      return { o, n: bills.length, t, p, out: t - p };
+    }).sort((a, b) => b.t - a.t);
 
     return `
       <div class="kpis">
-        ${kpi('Total invoiced', invoiced, 'invoices', `${data.bills.length} invoices · ${data.outlets.length} outlets`)}
-        ${kpi('Collected', collected, 'trend', `<b>${pct(collected, invoiced)}%</b> of invoiced amount`)}
-        ${kpi('Outstanding', invoiced - collected, 'clock', `${open.length} invoices awaiting payment`, 'blue')}
+        ${kpi('Billed today', sum(todays), 'invoices', `${todays.length} bill${todays.length === 1 ? '' : 's'} · ${inHouse} guests in house`)}
+        ${kpi('Collected', collected, 'trend', `<b>${pct(collected, invoiced)}%</b> of ${esc(currency())} ${compact(invoiced)} billed`)}
+        ${kpi('Outstanding', invoiced - collected, 'clock', `${open.length} open invoice${open.length === 1 ? '' : 's'}`, 'blue')}
         ${kpi('Overdue', overdue, 'alert', `${overdueBills.length} past due date`, overdueBills.length ? 'red' : '')}
       </div>
       <div class="split">
         <section class="card">
-          <div class="card-head"><div><h2>Billing & collections</h2><p>Last 7 days</p></div><div class="legend"><span><i></i>Invoiced</span><span><i class="b"></i>Collected</span></div></div>
+          <div class="card-head"><div><h2>Billing & collections</h2><p>Last 7 days</p></div><div class="legend"><span><i></i>Billed</span><span><i class="b"></i>Collected</span></div></div>
           <div class="chart-wrap chart">${chartSvg()}</div>
         </section>
         <section class="card">
-          <div class="card-head"><div><h2>Outstanding by outlet</h2><p>Share of each outlet’s billing collected</p></div><button class="link" data-act="nav" data-arg="Outlets">View all</button></div>
-          ${outletRows.length ? outletRows.slice(0, 5).map(({ o, bills, t, p, out }) => `
-            <div class="list-row">
-              <span class="tile-icon">${icon('outlets', 'sm')}</span>
-              <div class="grow">
-                <strong>${esc(o.name)}</strong>
-                <div style="display:flex;align-items:center;gap:8px;margin-top:6px"><div class="bar-track" style="flex:1"><i style="width:${pct(p, t)}%"></i></div><small>${pct(p, t)}%</small></div>
-              </div>
-              <div class="val">${money(out)}<small>${bills.length} inv.</small></div>
-            </div>`).join('') : emptyState('outlets', 'No outlets yet', 'Outlet balances will appear here.', isAdmin() ? `<button class="btn" data-act="form" data-arg="outlet">${icon('plus', 'sm')} Add outlet</button>` : '')}
+          <div class="card-head"><div><h2>Needs attention</h2><p>Bills to review and overdue balances</p></div><span class="badge ${attention.length ? 'pending' : 'success'}">${attention.length ? attention.length + ' open' : 'All clear'}</span></div>
+          ${attention.length ? attention.slice(0, 6).map(({ b, kind }) => `
+            <div class="list-row clickable" tabindex="0" data-act="invoice" data-arg="${esc(b.id)}">
+              <span class="tile-icon ${kind}">${icon(kind === 'pending' ? 'clock' : 'alert', 'sm')}</span>
+              <div class="grow"><strong class="mono">${esc(b.number)}</strong><small>${esc(b.customer)} · ${esc(outletName(b.outlet_id))}</small></div>
+              <div class="val">${money(kind === 'pending' ? b.amount : outstanding(b))}<small>${kind === 'pending' ? 'Awaiting review' : 'Due ' + fmtShort(b.due)}</small></div>
+            </div>`).join('') : emptyState('checkCircle', 'All clear', 'No bills awaiting review and nothing overdue.')}
         </section>
       </div>
+      <section class="card" style="margin-bottom:20px">
+        <div class="card-head"><div><h2>Outlet performance</h2><p>Billing and collections by outlet</p></div><button class="link" data-act="nav" data-arg="Outlets">Manage outlets ${icon('arrowRight', 'sm')}</button></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Outlet</th><th class="r">Bills</th><th class="r">Billed</th><th class="r">Collected</th><th class="r">Outstanding</th><th style="width:24%">Collection rate</th></tr></thead>
+          <tbody>${rows.length ? rows.map(({ o, n, t, p, out }) => `
+            <tr class="clickable" tabindex="0" data-act="outlet-invoices" data-arg="${esc(o.id)}">
+              <td><div class="person"><span class="tile-icon">${icon('outlets', 'sm')}</span><div><span class="primary-text">${esc(o.name)}</span><span class="secondary-text">${esc(o.category || 'Other')} · ${esc(o.location || '')}</span></div></div></td>
+              <td class="r num">${n}</td><td class="r amount">${money(t)}</td><td class="r muted-amount">${money(p)}</td><td class="r amount">${money(out)}</td>
+              <td><div style="display:flex;align-items:center;gap:10px"><div class="bar-track" style="flex:1"><i style="width:${pct(p, t)}%"></i></div><span class="num" style="min-width:36px;text-align:right">${pct(p, t)}%</span></div></td>
+            </tr>`).join('') : `<tr><td colspan="6">${emptyState('outlets', 'No outlets yet', 'Add outlets to see their performance.')}</td></tr>`}</tbody>
+          ${rows.length ? `<tfoot><tr><td>Total</td><td class="r">${data.bills.length}</td><td class="r">${money(invoiced)}</td><td class="r">${money(collected)}</td><td class="r">${money(invoiced - collected)}</td><td>${pct(collected, invoiced)}% collected</td></tr></tfoot>` : ''}
+        </table></div>
+      </section>
       <section class="card">
-        <div class="card-head"><div><h2>Recent invoices</h2><p>Latest charges posted by your outlets</p></div><button class="link" data-act="nav" data-arg="Invoices">View all ${icon('arrowRight', 'sm')}</button></div>
+        <div class="card-head"><div><h2>Recent invoices</h2><p>Latest bills posted by your outlets</p></div><button class="link" data-act="nav" data-arg="Invoices">View all ${icon('arrowRight', 'sm')}</button></div>
         <div class="table-wrap"><table>${invoiceHead()}<tbody>${invoiceRowsHtml(recent)}</tbody></table></div>
       </section>`;
   }
@@ -635,19 +678,19 @@
   /* ------------------------------------------------------------------ *
    * Invoices
    * ------------------------------------------------------------------ */
-  const invoiceHead = () => `<thead><tr><th>Invoice</th><th>Guest</th><th>Outlet</th><th>Date</th><th class="r">Amount (${esc(currency())})</th><th class="r">Outstanding</th><th>Status</th><th></th></tr></thead>`;
+  const invoiceHead = () => `<thead><tr><th>${isAdmin() ? 'Invoice' : 'Bill no.'}</th><th>Guest</th>${isAdmin() ? '<th>Outlet</th>' : ''}<th>Date</th><th class="r">Amount (${esc(currency())})</th><th class="r">Outstanding</th><th>Status</th><th></th></tr></thead>`;
 
   function invoiceRowsHtml(rows) {
     if (!rows.length) {
-      return `<tr><td colspan="8">${data.bills.length
+      return `<tr><td colspan="${isAdmin() ? 8 : 7}">${data.bills.length
         ? emptyState('search', 'No matching invoices', 'Try another search term or clear the filters.', `<button class="btn" data-act="clear-filters">Clear filters</button>`)
-        : emptyState('invoices', 'Your ledger starts here', 'Add an outlet, register a guest, then post the first invoice.')}</td></tr>`;
+        : emptyState('invoices', isAdmin() ? 'Your ledger starts here' : 'No bills yet', isAdmin() ? 'Add an outlet, register a guest, then post the first invoice.' : 'Post your first bill to a guest’s folio.', isAdmin() ? '' : `<button class="btn primary" data-act="form" data-arg="bill">${icon('plus', 'sm')} New bill</button>`)}</td></tr>`;
     }
     return rows.map((b) => `
       <tr class="clickable" tabindex="0" data-act="invoice" data-arg="${esc(b.id)}">
         <td><span class="primary-text mono">${esc(b.number)}</span><span class="secondary-text">Due ${fmtDate(b.due)}</span></td>
         <td><span class="primary-text">${esc(b.customer)}</span><span class="secondary-text">${esc(stayMeta(b))}</span></td>
-        <td>${esc(outletName(b.outlet_id))}</td>
+        ${isAdmin() ? `<td>${esc(outletName(b.outlet_id))}</td>` : ''}
         <td>${fmtDate(b.date)}</td>
         <td class="r amount">${money(b.amount)}</td>
         <td class="r muted-amount">${money(outstanding(b))}</td>
@@ -662,11 +705,11 @@
     return `
       <section class="card">
         <div class="toolbar">
-          <div class="search">${icon('search', 'sm')}<input class="input" type="search" aria-label="Search invoices" placeholder="Search invoice number, guest or room…" value="${esc(ui.search)}" data-input="search"></div>
-          <select class="input" aria-label="Filter by outlet" data-change="outletFilter">
+          <div class="search">${icon('search', 'sm')}<input class="input" type="search" aria-label="Search invoices" placeholder="${isAdmin() ? 'Search invoice number, guest or room…' : 'Search bill no., guest or room…'}" value="${esc(ui.search)}" data-input="search"></div>
+          ${isAdmin() ? `<select class="input" aria-label="Filter by outlet" data-change="outletFilter">
             <option value="">All outlets</option>
             ${data.outlets.map((o) => `<option value="${esc(o.id)}" ${ui.outletFilter === o.id ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}
-          </select>
+          </select>` : ''}
         </div>
         <div class="toolbar" style="padding-top:10px;padding-bottom:10px">
           <div class="chips" role="group" aria-label="Filter by status">
@@ -675,14 +718,14 @@
           </div>
         </div>
         <div class="table-wrap"><table>${invoiceHead()}<tbody id="invoiceRows">${invoiceRowsHtml(rows)}</tbody></table></div>
-        <div class="table-foot"><span id="rowCount">${rows.length} of ${data.bills.length} invoices</span><span id="rowTotal">Outstanding in view: ${esc(currency())} ${money(rows.reduce((t, b) => t + Math.max(0, outstanding(b)), 0))}</span></div>
+        <div class="table-foot"><span id="rowCount">${rows.length} of ${data.bills.length} ${isAdmin() ? 'invoices' : 'bills'}</span><span id="rowTotal">Outstanding in view: ${esc(currency())} ${money(rows.reduce((t, b) => t + Math.max(0, outstanding(b)), 0))}</span></div>
       </section>`;
   }
 
   function updateInvoiceRows() {
     const rows = filteredBills();
     document.getElementById('invoiceRows').innerHTML = invoiceRowsHtml(rows);
-    document.getElementById('rowCount').textContent = `${rows.length} of ${data.bills.length} invoices`;
+    document.getElementById('rowCount').textContent = `${rows.length} of ${data.bills.length} ${isAdmin() ? 'invoices' : 'bills'}`;
     document.getElementById('rowTotal').textContent = `Outstanding in view: ${currency()} ${money(rows.reduce((t, b) => t + Math.max(0, outstanding(b)), 0))}`;
   }
 
@@ -715,7 +758,7 @@
       </div>
       ${!isAdmin() ? banner('', 'info', 'Outlet allocations', 'Amounts reflect your outlet’s share of each guest payment.') : ''}
       <section class="card">
-        <div class="card-head"><div><h2>Payment receipts</h2><p>One receipt per guest payment. Invoice allocations are included in the CSV export.</p></div><button class="link" data-act="nav" data-arg="Guests">Collect from a guest ${icon('arrowRight', 'sm')}</button></div>
+        <div class="card-head"><div><h2>Payment receipts</h2><p>One receipt per guest payment. Invoice allocations are included in the CSV export.</p></div>${isAdmin() ? `<button class="link" data-act="nav" data-arg="Guests">Collect from a guest ${icon('arrowRight', 'sm')}</button>` : ''}</div>
         <div class="table-wrap"><table>
           <thead><tr><th>Reference</th><th>Guest</th><th>Covers</th><th>Date</th><th>Method</th><th class="r">Amount (${esc(currency())})</th></tr></thead>
           <tbody>${receipts.length ? receipts.map((r) => {
@@ -811,11 +854,12 @@
    * ------------------------------------------------------------------ */
   let lastFocus = null;
 
-  function openOverlay(html, label, drawer = false) {
+  function openOverlay(html, label, variant = false) {
+    const v = variant === true ? 'drawer' : variant || 'modal';
     lastFocus = document.activeElement;
     document.getElementById('modal').innerHTML = `
-      <div class="overlay ${drawer ? 'drawer-overlay' : ''}" data-overlay>
-        <section class="${drawer ? 'drawer' : 'modal'}" role="dialog" aria-modal="true" aria-label="${esc(label)}">${html}</section>
+      <div class="overlay ${v === 'drawer' ? 'drawer-overlay' : v === 'doc' ? 'doc-overlay' : ''}" data-overlay>
+        <section class="${v === 'drawer' ? 'drawer' : v === 'doc' ? 'doc-modal' : 'modal'}" role="dialog" aria-modal="true" aria-label="${esc(label)}">${html}</section>
       </div>`;
     document.querySelector('#modal input:not([type=hidden]), #modal select, #modal .drawer button, #modal button')?.focus();
   }
@@ -906,19 +950,30 @@
     }
 
     if (kind === 'bill') {
-      return modal('New invoice', 'Post a charge to a guest’s folio.',
+      const single = data.outlets.length === 1;
+      const first = data.outlets[0]?.id;
+      return modal(isAdmin() ? 'New invoice' : 'New bill', 'Post a charge to a guest’s folio.',
         `<div class="form-grid">
-          <label class="field"><span>Outlet</span><select name="outlet_id" required data-change="billOutlet">${outletOptions()}</select></label>
-          <label class="field"><span>Invoice number <span class="hint">· auto-generated</span></span><input id="invoiceNumber" name="number" value="${esc(nextInvoiceNumber(data.outlets[0]?.id))}" readonly required tabindex="-1"></label>
+          ${single
+            ? `<label class="field"><span>Outlet</span><input value="${esc(data.outlets[0].name)}" readonly tabindex="-1"><input type="hidden" name="outlet_id" value="${esc(first)}"></label>`
+            : `<label class="field"><span>Outlet</span><select name="outlet_id" required data-change="billOutlet">${outletOptions()}</select></label>`}
+          ${field('Bill date', 'date', 'date', today())}
+          <div class="field wide"><span>Bill number</span>
+            <div class="seg" role="radiogroup" aria-label="Bill numbering">
+              <label><input type="radio" name="num_mode" value="auto" checked data-change="numMode"><span>${icon('refresh', 'sm')} Auto-generate</span></label>
+              <label><input type="radio" name="num_mode" value="own" data-change="numMode"><span>${icon('hash', 'sm')} Our own bill no. / reference</span></label>
+            </div>
+            <input id="invoiceNumber" name="number" value="${esc(nextInvoiceNumber(first))}" readonly required maxlength="60" autocomplete="off" aria-describedby="numHint">
+            <small class="hint-line" id="numHint">Next number in this outlet’s sequence.</small>
+          </div>
           <label class="field wide"><span>Guest</span>
             <div class="search" style="margin-bottom:8px">${icon('search', 'sm')}<input class="input" type="search" placeholder="Filter by name, room or property…" data-input="stayFilter" aria-label="Filter guests"></div>
             <select id="guestSelect" name="stay_id" required><option value="">Select guest and room</option>${stayOptions()}</select>
           </label>
-          ${field('Invoice date', 'date', 'date', today())}
+          ${moneyField('Amount')}
           ${field('Due date', 'due', 'date', today())}
-          ${moneyField('Amount', '', 'max="100000000"', 'wide')}
-          <label class="field wide"><span>Description</span><textarea name="notes" required maxlength="2000" rows="3" placeholder="e.g. Dinner for two · Two-tank dive · Souvenirs"></textarea></label>
-        </div>`, footer('Submit invoice'), 'bills');
+          <label class="field wide"><span>Description</span><textarea name="notes" required maxlength="2000" rows="3" placeholder="e.g. Dinner for two – set menu&#10;Each line appears on the invoice"></textarea></label>
+        </div>`, footer(isAdmin() ? 'Submit invoice' : 'Submit bill'), 'bills');
     }
 
     if (kind === 'user') {
@@ -997,7 +1052,6 @@
   }
 
   async function submitForm(form) {
-    if (!requireLive()) return;
     const name = form.dataset.form;
     const btn = form.querySelector('button[type="submit"]');
     const errBox = form.querySelector('.form-error');
@@ -1005,6 +1059,15 @@
     if (!form.reportValidity()) return;
     const values = Object.fromEntries(new FormData(form));
     if (name === 'settings') values.currency = values.currency.toUpperCase();
+    if (name === 'bills') {
+      delete values.num_mode;
+      values.number = String(values.number || '').trim();
+      if (data.bills.some((b) => b.outlet_id === values.outlet_id && String(b.number).toLowerCase() === values.number.toLowerCase())) {
+        errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Bill number ${esc(values.number)} already exists for this outlet.</span></div>`;
+        return;
+      }
+    }
+    if (!requireLive()) return;
     btn.disabled = true;
     try {
       await post(name, values);
@@ -1023,36 +1086,79 @@
   function openInvoice(id) {
     const b = data.bills.find((x) => x.id === id);
     if (!b) return;
-    const pays = data.payments.filter((p) => p.bill_id === id).sort(byNewest);
-    const due = outstanding(b);
+    const o = data.outlets.find((x) => x.id === b.outlet_id) || { name: outletName(b.outlet_id) };
+    const s = stayOf(b);
+    const pays = data.payments.filter((p) => p.bill_id === id).sort((a, c) => (a.date || '').localeCompare(c.date || ''));
+    const paid = paidFor(id), due = outstanding(b), status = billStatus(b);
+    const lines = String(b.notes || 'Outlet charges').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     let primary = '';
-    if (isAdmin() && b.status === 'pending') primary = `<button class="btn primary" data-act="approve" data-arg="${esc(id)}" id="approveBtn">${icon('check', 'sm')} Approve invoice</button>`;
-    else if (isAdmin() && due > 0) primary = `<button class="btn primary" data-act="form" data-arg="payment" data-arg2="${esc(id)}">${icon('payments', 'sm')} Record payment</button>`;
+    if (isAdmin() && b.status === 'pending') primary = `<button class="btn sm primary" data-act="approve" data-arg="${esc(id)}" id="approveBtn">${icon('check', 'sm')} Approve</button>`;
+    else if (isAdmin() && due > 0) primary = `<button class="btn sm primary" data-act="form" data-arg="payment" data-arg2="${esc(id)}">${icon('payments', 'sm')} Record payment</button>`;
 
     openOverlay(`
-      <div class="drawer-head">
-        <div><div class="eyebrow">Invoice · ${esc(outletName(b.outlet_id))}</div><h2 class="mono">${esc(b.number)}</h2></div>
-        <button class="btn ghost icon sm" data-act="close" aria-label="Close">${icon('x', 'sm')}</button>
+      <div class="doc-bar">
+        <div class="doc-bar-title">${icon('invoices', 'sm')}<span class="mono">${esc(b.number)}</span>${statusBadge(b)}</div>
+        <div class="doc-bar-actions">
+          ${b.stay_id ? `<button class="btn sm ghost" data-act="guest-from" data-arg="${esc(b.stay_id)}">${icon('bed', 'sm')} Guest folio</button>` : ''}
+          <button class="btn sm" data-act="print-doc">${icon('printer', 'sm')} Print / PDF</button>
+          ${primary}
+          <button class="btn ghost icon sm" data-act="close" aria-label="Close">${icon('x', 'sm')}</button>
+        </div>
       </div>
-      <div class="drawer-body">
-        <div class="amount-hero"><div><small>Invoice total</small><div class="amt">${esc(currency())} ${money(b.amount)}</div></div>${statusBadge(b)}</div>
-        ${!b.stay_id && isAdmin() ? `<div class="alert warn" style="margin-bottom:16px">${icon('link', 'sm')}<span class="grow">This invoice isn’t linked to a guest stay.</span><button class="link" data-act="form" data-arg="link" data-arg2="${esc(id)}">Assign guest</button></div>` : ''}
-        <div class="kv"><span>Guest</span><strong>${esc(b.customer)}</strong></div>
-        <div class="kv"><span>Room / property</span><strong>${b.stay_id ? `<button class="link" data-act="guest-from" data-arg="${esc(b.stay_id)}">${esc(stayMeta(b))}</button>` : 'Unassigned'}</strong></div>
-        <div class="kv"><span>Invoice date</span><strong>${fmtDate(b.date)}</strong></div>
-        <div class="kv"><span>Due date</span><strong>${fmtDate(b.due)}</strong></div>
-        <div class="kv"><span>Collected</span><strong>${money(paidFor(id))}</strong></div>
-        <div class="kv"><span>Outstanding</span><strong>${money(due)}</strong></div>
-        <div class="kv"><span>Posted by</span><strong>${esc(b.created_by)}</strong></div>
-        ${b.notes ? `<div class="section-title">Description</div><div class="note-box">${esc(b.notes)}</div>` : ''}
-        <div class="section-title">Payments</div>
-        ${pays.length ? `<ul class="timeline">${pays.map((p) => `<li><span class="t-icon">${icon('check', 'sm')}</span><div class="grow"><strong>${esc(p.method)}</strong><small>${fmtDate(p.date)} · <span class="mono">${esc(p.reference)}</span></small></div><strong class="num">${money(p.amount)}</strong></li>`).join('')}</ul>` : '<p class="kpi-foot">No payments recorded yet.</p>'}
-        <div id="detailError" class="form-error" style="margin-top:16px"></div>
-      </div>
-      <div class="drawer-foot">
-        <button class="btn" data-act="print-drawer">${icon('printer', 'sm')} Print</button>
-        ${primary}
-      </div>`, 'Invoice ' + b.number, true);
+      <div id="detailError" class="form-error doc-error"></div>
+      ${!b.stay_id && isAdmin() ? `<div class="alert warn doc-alert">${icon('link', 'sm')}<span class="grow">This invoice isn’t linked to a guest stay.</span><button class="link" data-act="form" data-arg="link" data-arg2="${esc(id)}">Assign guest</button></div>` : ''}
+      <article class="invoice-doc" aria-label="Invoice ${esc(b.number)}">
+        ${status === 'Paid' ? '<div class="doc-stamp">Paid</div>' : ''}
+        <header class="inv-head">
+          <div class="inv-from">
+            <div class="inv-logo">${esc(initials(o.name))}</div>
+            <div>
+              <h2>${esc(o.name)}</h2>
+              <p>${esc([o.category, o.location].filter(Boolean).join(' · '))}</p>
+              <p>An outlet of ${esc(data.settings.company)}</p>
+            </div>
+          </div>
+          <div class="inv-title">
+            <h1>Invoice</h1>
+            <dl>
+              <div><dt>Invoice no.</dt><dd class="mono">${esc(b.number)}</dd></div>
+              <div><dt>Invoice date</dt><dd>${fmtDate(b.date)}</dd></div>
+              <div><dt>Due date</dt><dd>${fmtDate(b.due)}</dd></div>
+            </dl>
+          </div>
+        </header>
+        <section class="inv-parties">
+          <div><h4>Billed to</h4><strong>${esc(b.customer)}</strong>
+            <p>${s ? `Room ${esc(s.room)} · ${esc(s.property)}` : 'No guest stay linked'}</p>
+            ${s ? `<p>Stay ${fmtDate(s.arrival)} – ${fmtDate(s.departure)}</p>` : ''}</div>
+          <div><h4>Issued by</h4><strong>${esc(o.name)}</strong>
+            <p>${esc(o.location || '')}</p><p>${esc(o.category || '')}</p></div>
+          <div><h4>Payment</h4><strong>${esc(data.settings.company)} front office</strong>
+            <p>Settled on the guest’s consolidated bill</p><p>Status: ${esc(status)}</p></div>
+        </section>
+        <table class="inv-lines">
+          <thead><tr><th class="c-no">#</th><th>Description</th><th class="r c-qty">Qty</th><th class="r c-amt">Unit price</th><th class="r c-amt">Amount</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td><strong>${esc(lines[0])}</strong>${lines.slice(1).map((l) => `<div class="inv-sub">${esc(l)}</div>`).join('')}</td>
+              <td class="r">1</td><td class="r">${money(b.amount)}</td><td class="r">${money(b.amount)}</td></tr>
+          </tbody>
+        </table>
+        <div class="inv-bottom">
+          <div class="inv-notes">
+            <h4>Payments received</h4>
+            ${pays.length ? `<table class="inv-pays"><tbody>${pays.map((p) => `<tr><td>${fmtDate(p.date)}</td><td>${esc(p.method)}</td><td class="mono">${esc(p.reference)}</td><td class="r">${money(p.amount)}</td></tr>`).join('')}</tbody></table>` : '<p>No payments recorded yet.</p>'}
+          </div>
+          <div class="inv-totals">
+            <div><span>Subtotal</span><span>${money(b.amount)}</span></div>
+            <div><span>Payments received</span><span>− ${money(paid)}</span></div>
+            <div class="grand"><span>Balance due</span><span>${esc(currency())} ${money(due)}</span></div>
+          </div>
+        </div>
+        <footer class="inv-foot">
+          <p>Posted by ${esc(loginName(b.created_by))} · ${b.status === 'pending' ? 'Awaiting head office review' : 'Approved for collection'}</p>
+          <p>This charge is collected by the ${esc(data.settings.company)} front office as part of the guest’s consolidated bill. All amounts in ${esc(currency())}.</p>
+        </footer>
+      </article>`, 'Invoice ' + b.number, 'doc');
   }
 
   async function approve(id) {
@@ -1194,8 +1300,9 @@
         members: [],
       };
     }
-    if (ui.page === 'Settings' && demoRole !== 'admin') ui.page = 'Guests';
+    ui.page = null;
     ui.selectedStay = null;
+    ui.search = ''; ui.outletFilter = ''; ui.statusFilter = ''; ui.guestQuery = '';
     render();
   }
 
@@ -1251,6 +1358,7 @@
     'outlet-invoices': (id) => { navigate('Invoices'); ui.outletFilter = id; render(); },
     print: () => printWith(''),
     'print-drawer': () => printWith('printing-drawer'),
+    'print-doc': () => printWith('printing-doc'),
   };
 
   document.addEventListener('click', (e) => {
@@ -1273,7 +1381,20 @@
     if (e.target.dataset.change === 'outletFilter') { ui.outletFilter = e.target.value; updateInvoiceRows(); }
     if (e.target.dataset.change === 'billOutlet') {
       const n = document.getElementById('invoiceNumber');
-      if (n) n.value = nextInvoiceNumber(e.target.value);
+      const auto = e.target.form.querySelector('[name=num_mode]:checked')?.value !== 'own';
+      if (n && auto) n.value = nextInvoiceNumber(e.target.value);
+    }
+    if (e.target.dataset.change === 'numMode') {
+      const form = e.target.form, n = document.getElementById('invoiceNumber'), hint = document.getElementById('numHint');
+      if (e.target.value === 'own') {
+        n.readOnly = false; n.value = ''; n.placeholder = 'e.g. 10234 or RCPT-558';
+        hint.textContent = 'Enter the number printed on your outlet’s own bill or receipt.';
+        n.focus();
+      } else {
+        n.readOnly = true; n.placeholder = '';
+        n.value = nextInvoiceNumber(form.querySelector('[name=outlet_id]').value);
+        hint.textContent = 'Next number in this outlet’s sequence.';
+      }
     }
     if (e.target.dataset.change === 'role') {
       const f = e.target.closest('form').querySelector('[data-outlet-field]');
@@ -1291,7 +1412,7 @@
   document.addEventListener('keydown', (e) => {
     const dialog = document.querySelector('#modal [role="dialog"]');
     if (e.key === 'Escape' && dialog) return closeOverlay();
-    if (e.key === 'Enter' && e.target.matches('tr[data-act]')) e.target.click();
+    if (e.key === 'Enter' && e.target.matches('[data-act][tabindex="0"]')) e.target.click();
     if (e.key === 'Tab' && dialog) {
       const items = [...dialog.querySelectorAll('button, input, select, textarea, a[href]')].filter((n) => !n.disabled && n.type !== 'hidden');
       const first = items[0], last = items[items.length - 1];
