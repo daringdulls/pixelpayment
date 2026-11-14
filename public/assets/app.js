@@ -674,6 +674,10 @@
   /* ------------------------------------------------------------------ *
    * Overview
    * ------------------------------------------------------------------ */
+  function miniEmpty(ic, title, text) {
+    return `<div class="mini-empty">${icon(ic, 'sm')}<div><strong>${title}</strong><span>${text}</span></div></div>`;
+  }
+
   function overviewView() {
     const invoiced = sum(data.bills);
     const collected = sum(data.payments);
@@ -683,10 +687,19 @@
     const pendingBills = data.bills.filter((b) => b.status === 'pending');
     const todays = data.bills.filter((b) => b.date === today());
     const inHouse = stays().filter((s) => s.status === 'active').length;
-    const recent = data.bills.slice().sort(byNewest).slice(0, 6);
+    const recent = data.bills.slice().sort(byNewest).slice(0, 8);
     const attention = [...pendingBills.map((b) => ({ b, kind: 'pending' })), ...overdueBills.map((b) => ({ b, kind: 'overdue' }))];
 
-    const rows = data.outlets.map((o) => {
+    const tomorrow = shiftDate(today(), 1);
+    const deps = stays().filter((s) => s.status === 'active' && s.departure === tomorrow).map((s) => {
+      const bills = billsForStay(s.id);
+      const balance = sum(bills) - bills.reduce((t, b) => t + paidFor(b.id), 0);
+      const pending = bills.filter((b) => b.status === 'pending').length;
+      const state = pending ? ['pending', `${pending} to review`] : balance > 0 ? ['unpaid', 'Payment due'] : ['paid', 'Ready'];
+      return { s, balance, state };
+    }).sort((a, b) => String(a.s.room).localeCompare(String(b.s.room), undefined, { numeric: true }));
+
+    const perf = data.outlets.map((o) => {
       const bills = data.bills.filter((b) => b.outlet_id === o.id);
       const t = sum(bills), p = bills.reduce((a, b) => a + paidFor(b.id), 0);
       return { o, n: bills.length, t, p, out: t - p };
@@ -694,80 +707,52 @@
 
     return `
       <div class="kpis">
-        ${kpi('Billed today', sum(todays), 'invoices', `${todays.length} bill${todays.length === 1 ? '' : 's'} · ${inHouse} guests in house`)}
+        ${kpi('Outstanding', invoiced - collected, 'clock', `${open.length} open invoice${open.length === 1 ? '' : 's'}${altAmount(invoiced - collected) ? ' · ≈ ' + esc(altAmount(invoiced - collected)) : ''}`, 'blue')}
+        ${kpi('Billed today', sum(todays), 'invoices', `${todays.length} bill${todays.length === 1 ? '' : 's'} · ${inHouse} guest${inHouse === 1 ? '' : 's'} in house`)}
         ${kpi('Collected', collected, 'trend', `<b>${pct(collected, invoiced)}%</b> of ${esc(currency())} ${compact(invoiced)} billed`)}
-        ${kpi('Outstanding', invoiced - collected, 'clock', `${open.length} open invoice${open.length === 1 ? '' : 's'}`, 'blue')}
-        ${kpi('Overdue', overdue, 'alert', `${overdueBills.length} past due date`, overdueBills.length ? 'red' : '')}
+        ${kpi('Overdue', overdue, 'alert', overdueBills.length ? `${overdueBills.length} past due date` : 'Nothing overdue', overdueBills.length ? 'red' : '')}
       </div>
-      <div class="split">
-        <section class="card">
-          <div class="card-head"><div><h2>Billing & collections</h2><p>Last 7 days</p></div><div class="legend"><span><i></i>Billed</span><span><i class="b"></i>Collected</span></div></div>
-          <div class="chart-wrap chart">${chartSvg()}</div>
-        </section>
-        <section class="card">
-          <div class="card-head"><div><h2>Needs attention</h2><p>Bills to review and overdue balances</p></div><span class="badge ${attention.length ? 'pending' : 'success'}">${attention.length ? attention.length + ' open' : 'All clear'}</span></div>
-          ${attention.length ? attention.slice(0, 6).map(({ b, kind }) => `
-            <div class="list-row clickable" tabindex="0" data-act="invoice" data-arg="${esc(b.id)}">
-              <span class="tile-icon ${kind}">${icon(kind === 'pending' ? 'clock' : 'alert', 'sm')}</span>
-              <div class="grow"><strong class="mono">${esc(b.number)}</strong><small>${esc(b.customer)} · ${esc(outletName(b.outlet_id))}</small></div>
-              <div class="val">${money(kind === 'pending' ? b.amount : outstanding(b))}<small>${kind === 'pending' ? 'Awaiting review' : 'Due ' + fmtShort(b.due)}</small></div>
-            </div>`).join('') : emptyState('checkCircle', 'All clear', 'No bills awaiting review and nothing overdue.')}
-        </section>
-      </div>
-      ${departuresCard()}
-      <section class="card" style="margin-bottom:20px">
-        <div class="card-head"><div><h2>Outlet performance</h2><p>Billing and collections by outlet</p></div><button class="link" data-act="nav" data-arg="Outlets">Manage outlets ${icon('arrowRight', 'sm')}</button></div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Outlet</th><th class="r">Bills</th><th class="r">Billed</th><th class="r">Collected</th><th class="r">Outstanding</th><th style="width:24%">Collection rate</th></tr></thead>
-          <tbody>${rows.length ? rows.map(({ o, n, t, p, out }) => `
-            <tr class="clickable" tabindex="0" data-act="outlet-invoices" data-arg="${esc(o.id)}">
-              <td><div class="person"><span class="tile-icon">${icon('outlets', 'sm')}</span><div><span class="primary-text">${esc(o.name)}</span><span class="secondary-text">${esc(o.category || 'Other')} · ${esc(o.location || '')}</span></div></div></td>
-              <td class="r num">${n}</td><td class="r amount">${money(t)}</td><td class="r muted-amount">${money(p)}</td><td class="r amount">${money(out)}</td>
-              <td><div style="display:flex;align-items:center;gap:10px"><div class="bar-track" style="flex:1"><i style="width:${pct(p, t)}%"></i></div><span class="num" style="min-width:36px;text-align:right">${pct(p, t)}%</span></div></td>
-            </tr>`).join('') : `<tr><td colspan="6">${emptyState('outlets', 'No outlets yet', 'Add outlets to see their performance.')}</td></tr>`}</tbody>
-          ${rows.length ? `<tfoot><tr><td>Total</td><td class="r">${data.bills.length}</td><td class="r">${money(invoiced)}</td><td class="r">${money(collected)}</td><td class="r">${money(invoiced - collected)}</td><td>${pct(collected, invoiced)}% collected</td></tr></tfoot>` : ''}
-        </table></div>
-      </section>
-      <section class="card">
-        <div class="card-head"><div><h2>Recent invoices</h2><p>Latest bills posted by your outlets</p></div><button class="link" data-act="nav" data-arg="Invoices">View all ${icon('arrowRight', 'sm')}</button></div>
-        <div class="table-wrap"><table>${invoiceHead()}<tbody>${invoiceRowsHtml(recent)}</tbody></table></div>
-      </section>`;
-  }
-
-  // Guests checking out tomorrow, with what still needs doing before checkout.
-  function departuresCard() {
-    const tomorrow = shiftDate(today(), 1);
-    const list = stays().filter((s) => s.status === 'active' && s.departure === tomorrow)
-      .map((s) => {
-        const bills = billsForStay(s.id);
-        const total = sum(bills), balance = total - bills.reduce((t, b) => t + paidFor(b.id), 0);
-        const pending = bills.filter((b) => b.status === 'pending').length;
-        const state = pending ? ['pending', `${pending} to review`] : balance > 0 ? ['unpaid', 'Payment due'] : ['paid', 'Ready to check out'];
-        return { s, bills, total, balance, state };
-      })
-      .sort((a, b) => String(a.s.room).localeCompare(String(b.s.room), undefined, { numeric: true }));
-    const due = list.reduce((t, r) => t + Math.max(0, r.balance), 0);
-    const ready = list.filter((r) => r.state[0] === 'paid').length;
-    return `
-      <section class="card" style="margin-bottom:20px">
-        <div class="card-head">
-          <div><h2>Tomorrow’s departures</h2><p>${fmtDate(tomorrow)} · ${list.length} guest${list.length === 1 ? '' : 's'} checking out${list.length ? ` · ${ready} ready · ${esc(currency())} ${money(due)} to collect` : ''}</p></div>
-          <span class="badge ${list.length ? 'info' : 'neutral'}">${list.length} departure${list.length === 1 ? '' : 's'}</span>
+      <div class="dash-grid">
+        <div class="dash-main">
+          <section class="card">
+            <div class="card-head"><div><h2>Billing & collections</h2><p>Last 7 days · ${esc(currency())}</p></div><div class="legend"><span><i></i>Billed</span><span><i class="b"></i>Collected</span></div></div>
+            <div class="chart-wrap chart">${chartSvg()}</div>
+          </section>
+          <section class="card">
+            <div class="card-head"><div><h2>Recent invoices</h2><p>Latest bills posted by your outlets</p></div><button class="link" data-act="nav" data-arg="Invoices">All invoices ${icon('arrowRight', 'sm')}</button></div>
+            <div class="table-wrap"><table class="inv-compact">${invoiceHead()}<tbody>${invoiceRowsHtml(recent)}</tbody></table></div>
+          </section>
         </div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Guest</th><th>Room</th><th>Stay</th><th class="r">Charges</th><th class="r">Balance (${esc(currency())})</th><th>Checkout status</th><th></th></tr></thead>
-          <tbody>${list.length ? list.map(({ s, bills, balance, state }) => `
-            <tr class="clickable" tabindex="0" data-act="guest-from" data-arg="${esc(s.id)}">
-              <td><div class="person"><span class="avatar">${esc(initials(s.guest_name))}</span><div><span class="primary-text">${esc(s.guest_name)}</span><span class="secondary-text">${esc(s.property)}</span></div></div></td>
-              <td><span class="tag">${icon('bed', 'sm')}&nbsp;${esc(s.room)}</span></td>
-              <td>${fmtShort(s.arrival)} – ${fmtShort(s.departure)}<span class="secondary-text">${nights(s.arrival, s.departure)} nights</span></td>
-              <td class="r num">${bills.length}</td>
-              <td class="r amount">${money(balance)}</td>
-              <td><span class="badge ${state[0]}">${state[1]}</span></td>
-              <td class="r"><span class="link">Open folio ${icon('chevronRight', 'sm')}</span></td>
-            </tr>`).join('') : `<tr><td colspan="7">${emptyState('calendar', 'No departures tomorrow', 'Guests due to check out tomorrow will appear here.')}</td></tr>`}</tbody>
-        </table></div>
-      </section>`;
+        <aside class="dash-side">
+          <section class="card side-card">
+            <div class="card-head"><div><h2>Needs attention</h2><p>Bills to review and overdue balances</p></div>${attention.length ? `<span class="badge pending">${attention.length}</span>` : ''}</div>
+            ${attention.length ? attention.slice(0, 6).map(({ b, kind }) => `
+              <div class="list-row clickable" tabindex="0" data-act="invoice" data-arg="${esc(b.id)}">
+                <span class="tile-icon ${kind}">${icon(kind === 'pending' ? 'clock' : 'alert', 'sm')}</span>
+                <div class="grow"><strong class="mono">${esc(b.number)}</strong><small>${esc(b.customer)} · ${esc(outletName(b.outlet_id))}</small></div>
+                <div class="val">${money(kind === 'pending' ? b.amount : outstanding(b))}<small>${kind === 'pending' ? 'To review' : 'Due ' + fmtShort(b.due)}</small></div>
+              </div>`).join('') : miniEmpty('checkCircle', 'All clear', 'Nothing to review and nothing overdue.')}
+          </section>
+          <section class="card side-card">
+            <div class="card-head"><div><h2>Departing tomorrow</h2><p>${fmtDate(tomorrow)}${deps.length ? ` · ${esc(currency())} ${money(deps.reduce((t, d) => t + Math.max(0, d.balance), 0))} to collect` : ''}</p></div>${deps.length ? `<span class="badge info">${deps.length}</span>` : ''}</div>
+            ${deps.length ? deps.map(({ s, balance, state }) => `
+              <div class="list-row clickable" tabindex="0" data-act="guest-from" data-arg="${esc(s.id)}">
+                <span class="avatar">${esc(initials(s.guest_name))}</span>
+                <div class="grow"><strong>${esc(s.guest_name)}</strong><small>Room ${esc(s.room)} · ${esc(s.property)}</small></div>
+                <div class="val">${money(balance)}<small><span class="badge ${state[0]}">${state[1]}</span></small></div>
+              </div>`).join('') : miniEmpty('calendar', 'No departures tomorrow', 'Guests checking out tomorrow will show here.')}
+          </section>
+          <section class="card side-card">
+            <div class="card-head"><div><h2>Outlets</h2><p>Outstanding and share collected</p></div><button class="link" data-act="nav" data-arg="Outlets">Manage</button></div>
+            ${perf.length ? perf.map(({ o, n, t, p, out }) => `
+              <div class="list-row clickable perf-row" tabindex="0" data-act="outlet-invoices" data-arg="${esc(o.id)}">
+                <div class="perf-top"><strong>${esc(o.name)}</strong><span class="perf-due">${money(out)} <small>due</small></span></div>
+                <div class="bar-track"><i style="width:${pct(p, t)}%"></i></div>
+                <small class="perf-meta">${n} bill${n === 1 ? '' : 's'} · ${money(t)} billed · ${pct(p, t)}% collected</small>
+              </div>`).join('') : miniEmpty('outlets', 'No outlets yet', 'Add an outlet to start billing.')}
+          </section>
+        </aside>
+      </div>`;
   }
 
   function chartSvg() {
@@ -776,8 +761,8 @@
     const rawMax = Math.max(1, ...series.flat());
     const step = niceStep(rawMax / 4);
     const max = step * 4;
-    const W = 700, H = 240, L = 48, B = 26, T = 8, plotW = W - L, plotH = H - B - T;
-    const gw = plotW / 7, bw = Math.min(22, gw / 4);
+    const W = 900, H = 250, L = 48, B = 26, T = 8, plotW = W - L, plotH = H - B - T;
+    const gw = plotW / 7, bw = Math.min(26, gw / 4);
     let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Invoiced and collected amounts for the last 7 days">`;
     for (let i = 0; i <= 4; i++) {
       const y = T + plotH - (plotH * i) / 4;
