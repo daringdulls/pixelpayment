@@ -55,6 +55,8 @@
     copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
     key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
     tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+    arrowUpRight: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+    arrowDownRight: '<path d="m7 7 10 10"/><path d="M17 7v10H7"/>',
     hash: '<path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="M16 3l-2 18"/>',
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -707,6 +709,22 @@
     return `<div class="mini-empty">${icon(ic, 'sm')}<div><strong>${title}</strong><span>${text}</span></div></div>`;
   }
 
+  // Change badge, e.g. "↗ 12%", compared with the previous period.
+  function trend(cur, prev, upIsGood = true) {
+    if (!prev && !cur) return '<span class="trend flat">No activity</span>';
+    if (!prev) return '<span class="trend new">New this week</span>';
+    const ch = Math.round(((cur - prev) / Math.abs(prev)) * 100);
+    if (!ch) return '<span class="trend flat">No change</span>';
+    const good = (ch > 0) === upIsGood;
+    return `<span class="trend ${good ? 'good' : 'bad'}">${icon(ch > 0 ? 'arrowUpRight' : 'arrowDownRight', 'sm')}${Math.abs(ch)}%</span>`;
+  }
+  const statCard = (label, cents, ic, trendHtml, foot, tone = '') => `
+    <div class="stat-glass ${tone}">
+      <div class="sg-top"><span>${label}</span><span class="sg-icon">${icon(ic, 'sm')}</span></div>
+      <div class="sg-value"><span class="cur">${esc(currency())}</span>${money(cents)}</div>
+      <div class="sg-foot">${trendHtml}<span>${foot}</span></div>
+    </div>`;
+
   function overviewView() {
     const invoiced = sum(data.bills);
     const collected = sum(data.payments);
@@ -735,12 +753,20 @@
     }).sort((a, b) => b.t - a.t);
 
     return `
-      <div class="kpis">
-        ${kpi('Outstanding', invoiced - collected, 'clock', `${open.length} open invoice${open.length === 1 ? '' : 's'}${altAmount(invoiced - collected) ? ' · ≈ ' + esc(altAmount(invoiced - collected)) : ''}`, 'blue')}
-        ${kpi('Billed today', sum(todays), 'invoices', `${todays.length} bill${todays.length === 1 ? '' : 's'} · ${inHouse} guest${inHouse === 1 ? '' : 's'} in house`)}
-        ${kpi('Collected', collected, 'trend', `<b>${pct(collected, invoiced)}%</b> of ${esc(currency())} ${compact(invoiced)} billed`)}
-        ${kpi('Overdue', overdue, 'alert', overdueBills.length ? `${overdueBills.length} past due date` : 'Nothing overdue', overdueBills.length ? 'red' : '')}
-      </div>
+      ${(() => {
+        const t0 = today(), d7 = shiftDate(t0, -6), p0 = shiftDate(t0, -13), p1 = shiftDate(t0, -7);
+        const inRange = (list, a, b) => sum(list.filter((x) => x.date >= a && x.date <= b));
+        const asOf = (d) => sum(data.bills.filter((b) => b.date <= d)) - sum(data.payments.filter((x) => x.date <= d));
+        const billed7 = inRange(data.bills, d7, t0), billedPrev = inRange(data.bills, p0, p1);
+        const coll7 = inRange(data.payments, d7, t0), collPrev = inRange(data.payments, p0, p1);
+        const outNow = invoiced - collected, outThen = asOf(p1);
+        return `<div class="stats-glass">
+          ${statCard('Outstanding', outNow, 'clock', trend(outNow, outThen, false), `vs a week ago · ${open.length} open`)}
+          ${statCard('Billed · 7 days', billed7, 'invoices', trend(billed7, billedPrev), `vs previous 7 days · ${todays.length} today`)}
+          ${statCard('Collected · 7 days', coll7, 'trend', trend(coll7, collPrev), `vs previous 7 days · ${pct(collected, invoiced)}% of all billing`)}
+          ${statCard('Overdue', overdue, 'alert', overdueBills.length ? `<span class="trend bad">${overdueBills.length} bill${overdueBills.length === 1 ? '' : 's'}</span>` : '<span class="trend good">All on time</span>', overdueBills.length ? 'past their due date' : 'nothing past due', overdueBills.length ? 'alert' : '')}
+        </div>`;
+      })()}
       <div class="dash-grid">
         <div class="dash-main">
           <section class="card">
@@ -1299,17 +1325,18 @@
   }
   const currencySelect = (name, value) => (billCurrencies().length < 2
     ? `<input type="hidden" name="${name}" value="${esc(value)}">`
-    : `<label class="field"><span>Currency</span><select name="${name}" data-change="cur-switch">${billCurrencies().map((c) => `<option ${c === value ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+    : `<div class="field"><span>Currency</span><div class="seg cur-seg" role="radiogroup" aria-label="Currency">${billCurrencies().map((c) => `<label><input type="radio" name="${name}" value="${c}" ${c === value ? 'checked' : ''} data-change="cur-switch"><span>${c}</span></label>`).join('')}</div></div>
       <label class="field wide fx-field-row" data-fx-field hidden><span>Exchange rate <span class="hint">· ${fxRate() ? 'from head office, change it if this bill used a different rate' : 'no workspace rate yet, enter the rate used'}</span></span>
         <div class="fx-inline">1 USD = <input name="fx_rate_input" type="number" step="0.0001" min="0.0001" max="999" value="${fxRate() || ''}" placeholder="15.42" data-input="fx-rate" aria-label="MVR per 1 USD"> MVR</div></label>`);
   // Rate (MVR per 1 USD) entered on a form, falling back to the workspace rate.
   const formRate = (form) => Number(form.querySelector('[name=fx_rate_input]')?.value) || fxRate();
+  // Currency chosen on a bill/payment form (radio toggle, select, or hidden input).
+  const selectedCur = (form) => (form.querySelector('[name=bill_currency]:checked, [name=pay_currency]:checked, select[name=bill_currency], select[name=pay_currency], input[type=hidden][name=bill_currency], input[type=hidden][name=pay_currency]')?.value) || currency();
   const fxHint = () => (billCurrencies().length > 1 ? '<p class="hint-line wide fx-hint" data-fx-hint></p>' : '');
   function updateFxHint(form) {
     const hint = form.querySelector('[data-fx-hint]');
     if (!hint) return;
-    const sel = form.querySelector('[name=bill_currency], [name=pay_currency]');
-    const cur = sel ? sel.value : currency();
+    const cur = selectedCur(form);
     const amt = Number(form.querySelector('[name=amount]')?.value) || 0;
     const rate = formRate(form);
     if (cur === currency()) { hint.textContent = altAmount(toCents(amt)) ? `≈ ${altAmount(toCents(amt))} at ${fxText()}` : ''; return; }
@@ -1357,27 +1384,47 @@
     if (kind === 'bill') {
       const single = data.outlets.length === 1;
       const first = data.outlets[0]?.id;
-      return modal(isAdmin() ? 'New invoice' : 'New bill', 'Post a charge to a guest’s folio.',
-        `<div class="form-grid">
-          ${single
-            ? `<label class="field"><span>Outlet</span><input value="${esc(data.outlets[0].name)}" readonly tabindex="-1"><input type="hidden" name="outlet_id" value="${esc(first)}"></label>`
-            : `<label class="field"><span>Outlet</span><select name="outlet_id" required data-change="billOutlet">${outletOptions()}</select></label>`}
-          ${field('Bill date', 'date', 'date', today())}
-          <div class="field wide"><span>Bill number</span>
-            <div class="seg" role="radiogroup" aria-label="Bill numbering">
-              <label><input type="radio" name="num_mode" value="auto" checked data-change="numMode"><span>${icon('refresh', 'sm')} Auto-generate</span></label>
-              <label><input type="radio" name="num_mode" value="own" data-change="numMode"><span>${icon('hash', 'sm')} Our own bill no. / reference</span></label>
-            </div>
-            <input id="invoiceNumber" name="number" value="${esc(nextInvoiceNumber(first))}" readonly required maxlength="60" autocomplete="off" aria-describedby="numHint">
-            <small class="hint-line" id="numHint">Next number in this outlet’s sequence.</small>
+      return modal(isAdmin() ? 'New invoice' : 'New bill', 'Post a charge to a guest’s folio. The preview shows exactly what will be saved.',
+        `<div class="bill-layout">
+          <div class="bill-main">
+            <section class="bf-section">
+              <h3 class="bf-title"><span>1</span>Guest</h3>
+              <div class="form-grid">
+                ${single
+                  ? `<input type="hidden" name="outlet_id" value="${esc(first)}">`
+                  : `<label class="field wide"><span>Outlet</span><select name="outlet_id" required data-change="billOutlet">${outletOptions()}</select></label>`}
+                <div class="field wide"><span>Guest and room</span>
+                  <div class="guest-pick">
+                    <div class="search">${icon('search', 'sm')}<input class="input" type="search" placeholder="Filter…" data-input="stayFilter" aria-label="Filter guests"></div>
+                    <select id="guestSelect" name="stay_id" required aria-label="Guest and room"><option value="">Select guest and room</option>${stayOptions()}</select>
+                  </div>
+                </div>
+              </div>
+            </section>
+            <section class="bf-section">
+              <h3 class="bf-title"><span>2</span>Bill details</h3>
+              <div class="form-grid">
+                ${field('Bill date', 'date', 'date', today())}
+                ${field('Due date', 'due', 'date', today())}
+                <div class="field wide"><span>Bill number</span>
+                  <div class="num-row">
+                    <div class="seg" role="radiogroup" aria-label="Bill numbering">
+                      <label><input type="radio" name="num_mode" value="auto" checked data-change="numMode"><span>${icon('refresh', 'sm')} Auto</span></label>
+                      <label><input type="radio" name="num_mode" value="own" data-change="numMode"><span>${icon('hash', 'sm')} Our bill no. / ref</span></label>
+                    </div>
+                    <input id="invoiceNumber" name="number" value="${esc(nextInvoiceNumber(first))}" readonly required maxlength="60" autocomplete="off" aria-describedby="numHint" aria-label="Bill number">
+                  </div>
+                  <small class="hint-line" id="numHint">Next number in this outlet’s sequence.</small>
+                </div>
+              </div>
+            </section>
+            <section class="bf-section">
+              <h3 class="bf-title"><span>3</span>Charge</h3>
+              <div id="billBody">${billBodyHtml(first)}</div>
+            </section>
           </div>
-          <label class="field wide"><span>Guest</span>
-            <div class="search" style="margin-bottom:8px">${icon('search', 'sm')}<input class="input" type="search" placeholder="Filter by name, room or property…" data-input="stayFilter" aria-label="Filter guests"></div>
-            <select id="guestSelect" name="stay_id" required><option value="">Select guest and room</option>${stayOptions()}</select>
-          </label>
-          ${field('Due date', 'due', 'date', today())}
-          <div class="wide" id="billBody">${billBodyHtml(first)}</div>
-        </div>`, footer(isAdmin() ? 'Submit invoice' : 'Submit bill'), 'bills');
+          <aside class="bill-summary" id="billSummary" aria-live="polite" aria-label="Bill preview"></aside>
+        </div>`, footer(isAdmin() ? 'Post invoice' : 'Post bill'), 'bills');
     }
 
     if (kind === 'user') {
@@ -1457,7 +1504,7 @@
     const card = cardFor(oid);
     if (!card) {
       return `<div class="form-grid">
-        ${moneyField('Amount', '', 'max="100000000"', billCurrencies().length > 1 ? '' : 'wide')}
+        ${moneyField('Amount', '', 'max="100000000" placeholder="0.00"', billCurrencies().length > 1 ? 'amount-field' : 'wide amount-field')}
         ${currencySelect('bill_currency', currency())}
         ${fxHint()}
         <label class="field wide"><span>Description</span><textarea name="notes" required maxlength="2000" rows="3" placeholder="e.g. Dinner for two – set menu&#10;Each line appears on the invoice"></textarea></label>
@@ -1546,6 +1593,52 @@
     const notes = lines.join('\n') + (extra ? '\n' + extra : '');
     if (notes.length > 2000) return 'Too many items for one bill. Split it into two bills.';
     return { notes, amount: st.charged.toFixed(2) };
+  }
+
+  function updateBillSummary(form) {
+    const box = form.querySelector('#billSummary');
+    if (!box) return;
+    const oid = form.querySelector('[name=outlet_id]')?.value;
+    const o = data.outlets.find((x) => x.id === oid);
+    const st = stays().find((x) => x.id === form.querySelector('#guestSelect')?.value);
+    const num = form.querySelector('#invoiceNumber')?.value || '—';
+    const date = form.querySelector('[name=date]')?.value, due = form.querySelector('[name=due]')?.value;
+    const builder = form.querySelector('[data-builder]');
+    let lines = [], cur = currency(), orig = 0, charged = 0, rate = 0;
+    if (builder) {
+      const b = bbState(builder);
+      cur = b.cur; rate = b.rate; orig = b.net;
+      lines = b.used.filter((r) => r.name).map((r) => [(r.qty !== 1 ? r.qty + ' × ' : '') + r.name, r.line]);
+      if (b.pct) lines.push([`Discount ${b.pct}%`, -b.discount]);
+      charged = Number.isFinite(b.charged) ? b.charged : 0;
+    } else {
+      cur = selectedCur(form); rate = formRate(form);
+      const amt = Number(form.querySelector('[name=amount]')?.value) || 0;
+      const desc = (form.querySelector('[name=notes]')?.value || '').split('\n')[0].trim();
+      if (amt) lines = [[desc || 'Charge', amt]];
+      orig = amt;
+      charged = cur === currency() ? amt : rate ? r2(convert(amt, cur, currency(), rate)) : 0;
+    }
+    const foreign = cur !== currency();
+    box.innerHTML = `
+      <div class="bs-paper">
+        <div class="bs-head"><span class="bs-kicker">${isAdmin() ? 'Invoice' : 'Bill'} preview</span><strong class="mono">${esc(num)}</strong></div>
+        <div class="bs-outlet">${esc(o?.name || '—')}</div>
+        <dl class="bs-meta">
+          <div><dt>Guest</dt><dd>${st ? esc(st.guest_name) : '<span class="bs-missing">Choose a guest</span>'}</dd></div>
+          ${st ? `<div><dt>Room</dt><dd>${esc(st.room)} · ${esc(st.property)}</dd></div>` : ''}
+          <div><dt>Bill date</dt><dd>${date ? fmtDate(date) : '—'}</dd></div>
+          <div><dt>Due</dt><dd>${due ? fmtDate(due) : '—'}</dd></div>
+        </dl>
+        <div class="bs-lines">
+          <div class="bs-lines-head"><span>Charges</span><span>${esc(cur)}</span></div>
+          ${lines.length ? lines.map(([n, v]) => `<div><span>${esc(n)}</span><span>${money(toCents(v))}</span></div>`).join('') : '<p class="bs-missing">No charges added yet</p>'}
+        </div>
+        ${foreign ? `<div class="bs-row"><span>Total in ${esc(cur)}</span><span>${money(toCents(orig))}</span></div>
+          <div class="bs-row bs-fx"><span>${rate ? 'Converted at ' + esc(fxText(rate)) : 'Enter the exchange rate'}</span></div>` : ''}
+        <div class="bs-total"><span>Charge to guest</span><strong>${esc(currency())} ${money(toCents(charged))}</strong></div>
+        ${!foreign && altAmount(toCents(charged)) && charged ? `<p class="bs-alt">≈ ${esc(altAmount(toCents(charged)))}</p>` : ''}
+      </div>`;
   }
 
   async function post(action, body) {
@@ -1939,7 +2032,7 @@
     },
     export: exportCsv,
     close: closeOverlay,
-    form: (arg, el) => { openForm(arg, el.dataset.arg2); const bld = document.querySelector('#modal [data-builder]'); if (bld) bbRecalc(bld); const f = document.querySelector('#modal form'); if (f) updateFxHint(f); },
+    form: (arg, el) => { openForm(arg, el.dataset.arg2); const bld = document.querySelector('#modal [data-builder]'); if (bld) bbRecalc(bld); const f = document.querySelector('#modal form'); if (f) { updateFxHint(f); updateBillSummary(f); } },
     invoice: openInvoice,
     approve,
     guest: (id) => { ui.selectedStay = id; render(); window.scrollTo(0, 0); },
@@ -2005,10 +2098,16 @@
     const el = e.target.closest('[data-act]');
     if (!el || el.disabled) return;
     const fn = ACTIONS[el.dataset.act];
-    if (fn) { e.preventDefault(); fn(el.dataset.arg ?? '', el); }
+    if (fn) {
+      e.preventDefault();
+      const bf = el.closest('form');
+      fn(el.dataset.arg ?? '', el);
+      if (bf && bf.isConnected && bf.querySelector('#billSummary')) updateBillSummary(bf);
+    }
   });
 
   document.addEventListener('input', (e) => {
+    if (e.target.form && e.target.form.querySelector('#billSummary')) { const bf = e.target.form; setTimeout(() => updateBillSummary(bf), 0); }
     if (e.target.name === 'amount' && e.target.form?.querySelector('[data-fx-hint]')) updateFxHint(e.target.form);
     const rf = e.target.dataset.rateField;
     if (rf && ui.rateDraft) {
@@ -2037,7 +2136,7 @@
     }
     else if (key === 'fx-rate') {
       const form = e.target.form, dueEl = form.querySelector('[data-due]'), amount = form.querySelector('[name=amount]');
-      const sel = form.querySelector('[name=pay_currency]');
+      const sel = form.querySelector('[name=pay_currency]') ? { value: selectedCur(form) } : null;
       if (dueEl && amount && sel && sel.value !== currency() && formRate(form)) {
         const m = r2(convert(Number(dueEl.dataset.due) / 100, currency(), sel.value, formRate(form)));
         amount.max = m; amount.value = m.toFixed(2);
@@ -2057,6 +2156,7 @@
   });
 
   document.addEventListener('change', (e) => {
+    if (e.target.form && e.target.form.querySelector('#billSummary')) { const bf = e.target.form; setTimeout(() => updateBillSummary(bf), 0); }
     if (e.target.dataset.change === 'outletFilter') { ui.outletFilter = e.target.value; updateInvoiceRows(); }
     if (e.target.dataset.rateMeta === 'currency') { render(); return; }
     if (e.target.dataset.change === 'logo-file' && e.target.files[0]) {
@@ -2078,8 +2178,8 @@
       ui.rateOutlet = e.target.value; ui.rateDraft = null; ui.rateDirty = false; ui.rateQuery = ''; render(); return;
     }
     if (e.target.dataset.change === 'cur-switch') {
-      const form = e.target.form, cur = e.target.value, prev = e.target.dataset.prev || currency();
-      e.target.dataset.prev = cur;
+      const form = e.target.form, cur = e.target.value, prev = form.dataset.prevCur || currency();
+      form.dataset.prevCur = cur;
       form.querySelectorAll('[data-affix]').forEach((a) => { a.textContent = cur; });
       const fxField = form.querySelector('[data-fx-field]');
       if (fxField) { fxField.hidden = cur === currency(); fxField.querySelector('input').required = cur !== currency(); }
