@@ -1,14 +1,15 @@
 // Staff login management: create username/password logins and reset passwords.
-// Requires SUPABASE_SERVICE_ROLE_KEY (server-side only, never sent to the browser).
+// Requires SUPABASE_SECRET_KEY (new sb_secret_… key) or legacy SUPABASE_SERVICE_ROLE_KEY.
+// Server-side only, never sent to the browser.
 // Every request is checked against the caller's workspace membership first:
 // only head office administrators may manage logins, and only for their own workspace.
 
 const USERNAME = /^[a-z0-9][a-z0-9._-]{2,31}$/;
 
 export async function staff(req, res, path, { endpoint, key, domain }) {
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const service = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!service) {
-    return res.status(503).json({ error: 'Username logins are not switched on yet. Add SUPABASE_SERVICE_ROLE_KEY to the Vercel project environment variables, then redeploy.' });
+    return res.status(503).json({ error: 'Username logins are not switched on yet. Add SUPABASE_SECRET_KEY to the Vercel project environment variables, then redeploy.' });
   }
 
   const callerAuth = req.headers.authorization;
@@ -19,7 +20,8 @@ export async function staff(req, res, path, { endpoint, key, domain }) {
   };
   const authAdmin = (p, init = {}) => fetch(endpoint + '/auth/v1/admin/' + p, {
     ...init,
-    headers: { Authorization: 'Bearer ' + service, apikey: service, 'Content-Type': 'application/json' },
+    // New sb_secret_ keys go in the apikey header only; legacy service_role JWTs also go in Authorization.
+    headers: { apikey: service, ...(service.startsWith('sb_') ? {} : { Authorization: 'Bearer ' + service }), 'Content-Type': 'application/json' },
   });
 
   try {

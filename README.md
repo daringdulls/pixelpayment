@@ -19,7 +19,7 @@ Live: https://cozy-guest-ledger.vercel.app
 |---|---|
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_PUBLISHABLE_KEY` | Supabase anon/publishable key (served to the browser via `/api/config`) |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Server only.** Lets head office create username logins and reset passwords (`api/_staff.js`). Never exposed to the browser. |
+| `SUPABASE_SECRET_KEY` | **Server only.** The `sb_secret_…` key (Supabase → Project Settings → API Keys → Secret keys). Lets head office create username logins and reset passwords (`api/_staff.js`). Never exposed to the browser. Legacy `SUPABASE_SERVICE_ROLE_KEY` is also accepted. |
 | `STAFF_USERNAME_DOMAIN` | Optional. Username logins are stored as `<username>@<domain>` in Supabase Auth. Default `pixelpayment.local`. |
 
 ## Develop
@@ -30,7 +30,7 @@ npm run build   # outputs dist/
 
 ## Staff logins
 Head office can add users in **Settings → Staff & logins → Add user**:
-- **Username & password**: creates a confirmed login right away (requires `SUPABASE_SERVICE_ROLE_KEY`). Staff sign in with the username.
+- **Username & password**: creates a confirmed login right away (requires `SUPABASE_SECRET_KEY`). Staff sign in with the username.
 - **Invite by email**: the staff member creates their own account with that email and confirms it.
 
 The key icon on each user resets their password. The server only allows this for administrators and only for members of this workspace.
