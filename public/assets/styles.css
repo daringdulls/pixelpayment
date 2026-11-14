@@ -462,3 +462,5 @@ tr:hover .row-arrow { color: var(--brand); }
 .banner { flex-wrap: wrap; }
 .banner .chips { margin-left: auto; }
 @media (max-width: 640px) { .pw-row { flex-wrap: wrap; } .pw-row input { flex-basis: 100%; } }
+.field input[readonly] { background: var(--surface-2); color: var(--ink); font-family: var(--mono); font-size: 13.5px; cursor: default; box-shadow: none; }
+.field input[readonly]:focus { border-color: var(--line); box-shadow: none; }

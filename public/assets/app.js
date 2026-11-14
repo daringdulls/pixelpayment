@@ -855,6 +855,18 @@
     <div class="pw-row"><input name="password" type="text" minlength="12" maxlength="72" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Type or generate">
     <button type="button" class="btn" data-act="gen-pass">${icon('refresh', 'sm')} Generate</button>
     <button type="button" class="btn icon" data-act="copy-pass" title="Copy password" aria-label="Copy password">${icon('copy', 'sm')}</button></div></label>`;
+  // Next invoice number for an outlet: outlet initials + running sequence, e.g. Cozy Deck -> CD-048.
+  function invoicePrefix(outletId) {
+    const name = data.outlets.find((o) => o.id === outletId)?.name || 'INV';
+    const letters = name.split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w[0].toUpperCase()).join('');
+    return (letters || 'INV').slice(0, 4);
+  }
+  function nextInvoiceNumber(outletId) {
+    const prefix = invoicePrefix(outletId);
+    const re = new RegExp('^' + prefix + '-(\\d+)$', 'i');
+    const max = data.bills.reduce((m, b) => { const hit = re.exec(String(b.number || '')); return hit ? Math.max(m, parseInt(hit[1], 10)) : m; }, 0);
+    return prefix + '-' + String(max + 1).padStart(3, '0');
+  }
   const methodField = () => `<label class="field"><span>Payment method</span><select name="method">${METHODS.map((m) => `<option>${m}</option>`).join('')}</select></label>`;
   const outletOptions = () => data.outlets.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
   const stayOptions = (q = '') => stays().filter((s) => s.status === 'active' && stayLabel(s).toLowerCase().includes(q.toLowerCase()))
@@ -896,8 +908,8 @@
     if (kind === 'bill') {
       return modal('New invoice', 'Post a charge to a guest’s folio.',
         `<div class="form-grid">
-          <label class="field"><span>Outlet</span><select name="outlet_id" required>${outletOptions()}</select></label>
-          ${field('Invoice number', 'number', 'text', '', 'maxlength="60" placeholder="INV-001" autocomplete="off"')}
+          <label class="field"><span>Outlet</span><select name="outlet_id" required data-change="billOutlet">${outletOptions()}</select></label>
+          <label class="field"><span>Invoice number <span class="hint">· auto-generated</span></span><input id="invoiceNumber" name="number" value="${esc(nextInvoiceNumber(data.outlets[0]?.id))}" readonly required tabindex="-1"></label>
           <label class="field wide"><span>Guest</span>
             <div class="search" style="margin-bottom:8px">${icon('search', 'sm')}<input class="input" type="search" placeholder="Filter by name, room or property…" data-input="stayFilter" aria-label="Filter guests"></div>
             <select id="guestSelect" name="stay_id" required><option value="">Select guest and room</option>${stayOptions()}</select>
@@ -1259,6 +1271,10 @@
 
   document.addEventListener('change', (e) => {
     if (e.target.dataset.change === 'outletFilter') { ui.outletFilter = e.target.value; updateInvoiceRows(); }
+    if (e.target.dataset.change === 'billOutlet') {
+      const n = document.getElementById('invoiceNumber');
+      if (n) n.value = nextInvoiceNumber(e.target.value);
+    }
     if (e.target.dataset.change === 'role') {
       const f = e.target.closest('form').querySelector('[data-outlet-field]');
       if (f) f.hidden = e.target.value === 'admin';
