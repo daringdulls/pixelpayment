@@ -107,7 +107,7 @@
   // Two-currency support (USD and MVR). The rate is MVR per 1 USD, set by head office.
   const fxRate = () => Number(brand.fx_usd_mvr) || 0;
   const altCurrency = () => (currency() === 'USD' ? 'MVR' : currency() === 'MVR' ? 'USD' : null);
-  const billCurrencies = () => (altCurrency() && fxRate() ? [currency(), altCurrency()] : [currency()]);
+  const billCurrencies = () => (altCurrency() ? [currency(), altCurrency()] : [currency()]);
   const r2 = (x) => Math.round(x * 100) / 100;
   function convert(a, from, to, rate = fxRate()) {
     if (from === to) return a;
@@ -423,7 +423,7 @@
         <aside class="sidebar" id="sidebar">
           <div class="brand-row"><span class="mark">${icon('logo')}</span><div class="wordmark">Pixel Payment<small>Guest billing</small></div></div>
           <div class="org-switch"><span class="org-avatar">${esc(initials(data.settings.company))}</span><div style="min-width:0"><strong>${esc(data.settings.company)}</strong><small>${who} · ${esc(currency())}</small></div></div>
-          <nav aria-label="Main">${nav}</nav>
+          <nav aria-label="Main" class="nav-main"><span class="nav-indicator" aria-hidden="true"></span>${nav}</nav>
           <div class="sidebar-foot">
             <div class="user-chip">
               <span class="avatar">${esc(initials(loginName(data.email)))}</span>
@@ -454,6 +454,35 @@
           </main>
         </div>
       </div>`;
+    afterRender();
+  }
+
+  let lastIndicatorTop = null;
+  let lastRenderedPage = null;
+  const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function afterRender() {
+    const nav = document.querySelector('.nav-main');
+    const ind = nav && nav.querySelector('.nav-indicator');
+    const act = nav && nav.querySelector('.nav-item.active');
+    if (ind && act) {
+      const top = act.offsetTop, h = act.offsetHeight;
+      ind.style.height = h + 'px';
+      if (lastIndicatorTop !== null && lastIndicatorTop !== top && !reducedMotion()) {
+        ind.style.transition = 'none';
+        ind.style.transform = `translateY(${lastIndicatorTop}px)`;
+        ind.getBoundingClientRect();
+        ind.style.transition = '';
+      }
+      ind.style.transform = `translateY(${top}px)`;
+      ind.style.opacity = '1';
+      lastIndicatorTop = top;
+    }
+    const pageKey = ui.page + '|' + (ui.selectedStay || '');
+    if (pageKey !== lastRenderedPage) {
+      const content = document.getElementById('content');
+      if (content && lastRenderedPage !== null && !reducedMotion()) content.classList.add('page-enter');
+      lastRenderedPage = pageKey;
+    }
   }
 
   function banner(tone, ic, title, text, action = '') {
@@ -1270,7 +1299,11 @@
   }
   const currencySelect = (name, value) => (billCurrencies().length < 2
     ? `<input type="hidden" name="${name}" value="${esc(value)}">`
-    : `<label class="field"><span>Currency</span><select name="${name}" data-change="cur-switch">${billCurrencies().map((c) => `<option ${c === value ? 'selected' : ''}>${c}</option>`).join('')}</select></label>`);
+    : `<label class="field"><span>Currency</span><select name="${name}" data-change="cur-switch">${billCurrencies().map((c) => `<option ${c === value ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+      <label class="field wide fx-field-row" data-fx-field hidden><span>Exchange rate <span class="hint">· ${fxRate() ? 'from head office, change it if this bill used a different rate' : 'no workspace rate yet, enter the rate used'}</span></span>
+        <div class="fx-inline">1 USD = <input name="fx_rate_input" type="number" step="0.0001" min="0.0001" max="999" value="${fxRate() || ''}" placeholder="15.42" data-input="fx-rate" aria-label="MVR per 1 USD"> MVR</div></label>`);
+  // Rate (MVR per 1 USD) entered on a form, falling back to the workspace rate.
+  const formRate = (form) => Number(form.querySelector('[name=fx_rate_input]')?.value) || fxRate();
   const fxHint = () => (billCurrencies().length > 1 ? '<p class="hint-line wide fx-hint" data-fx-hint></p>' : '');
   function updateFxHint(form) {
     const hint = form.querySelector('[data-fx-hint]');
@@ -1278,8 +1311,10 @@
     const sel = form.querySelector('[name=bill_currency], [name=pay_currency]');
     const cur = sel ? sel.value : currency();
     const amt = Number(form.querySelector('[name=amount]')?.value) || 0;
-    hint.textContent = cur === currency() ? (altAmount(toCents(amt)) ? `≈ ${altAmount(toCents(amt))} at ${fxText()}` : '')
-      : `= ${currency()} ${money(toCents(r2(convert(amt, cur, currency()))))} at ${fxText()}. The ${cur} amount is printed on the record.`;
+    const rate = formRate(form);
+    if (cur === currency()) { hint.textContent = altAmount(toCents(amt)) ? `≈ ${altAmount(toCents(amt))} at ${fxText()}` : ''; return; }
+    hint.textContent = rate ? `= ${currency()} ${money(toCents(r2(convert(amt, cur, currency(), rate))))} at ${fxText(rate)}. The ${cur} amount and rate are printed on the record.`
+      : `Enter the exchange rate to convert ${cur} to ${currency()}.`;
   }
   const methodField = () => `<label class="field"><span>Payment method</span><select name="method">${METHODS.map((m) => `<option>${m}</option>`).join('')}</select></label>`;
   const outletOptions = () => data.outlets.map((o) => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
@@ -1438,6 +1473,7 @@
     return `<div class="bill-builder" data-builder data-outlet="${esc(oid)}" data-cur="${esc(cur)}">
       <div class="bb-title"><strong>Items</strong>
         ${choices.length > 1 ? `<label class="inline-field">Bill in <select class="input" data-change="bb-cur" aria-label="Bill currency" style="width:auto">${choices.map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select></label>` : ''}
+        <label class="inline-field bb-rate" ${cur === currency() && listCur === cur ? 'hidden' : ''}>1 USD = <input class="input r" type="number" step="0.0001" min="0.0001" value="${cardRate(card) || ''}" placeholder="15.42" data-input="bb-rate" data-bb="rate" aria-label="MVR per 1 USD" style="width:92px"> MVR</label>
         <span class="hint-line">From the ${esc(outletName(oid))} rate card · list prices in ${esc(listCur)}</span></div>
       <div class="bb-row bb-labels"><span>Item</span><span class="r">Qty</span><span class="r">Unit (${esc(cur)})</span><span class="r">Total</span><span></span></div>
       <div id="bbRows">${bbRowHtml(card)}</div>
@@ -1466,7 +1502,7 @@
     </div>`;
   function bbState(builder) {
     const card = cardFor(builder.dataset.outlet);
-    const cur = builder.dataset.cur || cardCurrency(card), rate = cardRate(card);
+    const cur = builder.dataset.cur || cardCurrency(card), rate = Number(builder.querySelector('[data-bb=rate]')?.value) || cardRate(card);
     const rows = [...builder.querySelectorAll('#bbRows .bb-row')].map((row) => {
       const sel = row.querySelector('select').value;
       const custom = row.querySelector('.bb-custom');
@@ -1486,11 +1522,12 @@
     const st = bbState(builder);
     st.rows.forEach((r) => { r.row.querySelector('.bb-line').textContent = money(toCents(r.line)); });
     builder.querySelector('#bbAmount').value = st.charged > 0 ? st.charged.toFixed(2) : '';
+    if (!Number.isFinite(st.charged)) st.charged = 0;
     const foreign = st.cur !== currency();
     builder.querySelector('#bbTotals').innerHTML = `
       <div><span>Subtotal</span><span>${esc(st.cur)} ${money(toCents(st.subtotal))}</span></div>
       ${st.pct ? `<div><span>Discount ${st.pct}%</span><span>− ${esc(st.cur)} ${money(toCents(st.discount))}</span></div>` : ''}
-      ${foreign ? `<div><span>Total</span><span>${esc(st.cur)} ${money(toCents(st.net))}</span></div><div class="bb-fx"><span>at ${esc(fxText(st.rate))}</span></div>` : ''}
+      ${foreign ? `<div><span>Total</span><span>${esc(st.cur)} ${money(toCents(st.net))}</span></div><div class="bb-fx"><span>${st.rate ? 'at ' + esc(fxText(st.rate)) : 'Enter the exchange rate above'}</span></div>` : ''}
       <div class="grand"><span>Charge to guest</span><span>${esc(currency())} ${money(toCents(st.charged))}</span></div>`;
   }
   function bbCompose(form) {
@@ -1500,6 +1537,7 @@
     const unnamed = st.used.find((r) => !r.name);
     if (unnamed) return 'Describe the custom item.';
     if (st.used.some((r) => !(r.qty > 0))) return 'Quantities must be at least 1.';
+    if ((st.cur !== currency() || cardCurrency(st.card) !== st.cur) && !(st.rate > 0)) return 'Enter the exchange rate (MVR per 1 USD).';
     if (!(st.charged > 0)) return 'The bill total must be more than zero.';
     const lines = st.used.map((r) => `${r.qty} × ${r.name.replace(/\s*@\s*/g, ' at ')} @ ${st.cur} ${r.price.toFixed(2)}`);
     if (st.pct) lines.push(`1 × Discount ${st.pct}% @ ${st.cur} -${st.discount.toFixed(2)}`);
@@ -1537,12 +1575,14 @@
         Object.assign(values, composed);
       }
       const bc = values.bill_currency || currency();
+      const billRate = formRate(form);
       delete values.bill_currency;
+      delete values.fx_rate_input;
       if (!form.querySelector('[data-builder]') && bc !== currency()) {
-        const amt = Number(values.amount), conv = r2(convert(amt, bc, currency()));
-        if (!(conv > 0)) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Set the exchange rate in Settings before billing in ${esc(bc)}.</span></div>`; return; }
+        const amt = Number(values.amount), conv = r2(convert(amt, bc, currency(), billRate));
+        if (!(conv > 0)) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Enter the exchange rate (MVR per 1 USD) to bill in ${esc(bc)}.</span></div>`; return; }
         const lines = String(values.notes || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-        values.notes = [`1 × ${(lines[0] || 'Outlet charges').replace(/\s*@\s*/g, ' at ')} @ ${bc} ${amt.toFixed(2)}`, fxLine(), ...lines.slice(1)].join('\n');
+        values.notes = [`1 × ${(lines[0] || 'Outlet charges').replace(/\s*@\s*/g, ' at ')} @ ${bc} ${amt.toFixed(2)}`, fxLine(billRate), ...lines.slice(1)].join('\n');
         values.amount = conv.toFixed(2);
       }
       values.number = String(values.number || '').trim();
@@ -1553,17 +1593,19 @@
     }
     if (name === 'payments' || name === 'settle') {
       const pc = values.pay_currency || currency();
+      const payRate = formRate(form);
       delete values.pay_currency;
+      delete values.fx_rate_input;
       if (pc !== currency()) {
         const amt = Number(values.amount);
-        let conv = r2(convert(amt, pc, currency()));
+        let conv = r2(convert(amt, pc, currency(), payRate));
         const dueEl = form.querySelector('[data-due]');
         const dueMajor = dueEl ? Number(dueEl.dataset.due) / 100 : null;
         if (dueMajor !== null && Math.abs(conv - dueMajor) < 0.02) conv = dueMajor; // full payment: absorb rounding
-        if (!(conv > 0)) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Set the exchange rate in Settings before taking ${esc(pc)}.</span></div>`; return; }
+        if (!(conv > 0)) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Enter the exchange rate (MVR per 1 USD) to take ${esc(pc)}.</span></div>`; return; }
         if (dueMajor !== null && conv > dueMajor) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>That is more than the balance (${esc(currency())} ${money(toCents(dueMajor))}).</span></div>`; return; }
         values.amount = conv.toFixed(2);
-        values.reference = `${values.reference} · paid ${pc} ${amt.toFixed(2)} at ${fxText()}`.slice(0, 100);
+        values.reference = `${values.reference} · paid ${pc} ${amt.toFixed(2)} at ${fxText(payRate)}`.slice(0, 100);
       }
     }
     if (!requireLive()) return;
@@ -1993,6 +2035,23 @@
         if (sw) { sw.style.background = v; sw.style.color = inkOn(v); }
       }
     }
+    else if (key === 'fx-rate') {
+      const form = e.target.form, dueEl = form.querySelector('[data-due]'), amount = form.querySelector('[name=amount]');
+      const sel = form.querySelector('[name=pay_currency]');
+      if (dueEl && amount && sel && sel.value !== currency() && formRate(form)) {
+        const m = r2(convert(Number(dueEl.dataset.due) / 100, currency(), sel.value, formRate(form)));
+        amount.max = m; amount.value = m.toFixed(2);
+      }
+      updateFxHint(form);
+    }
+    else if (key === 'bb-rate') {
+      const builder = e.target.closest('[data-builder]'), card = cardFor(builder.dataset.outlet), rate = Number(e.target.value);
+      builder.querySelectorAll('#bbRows .bb-row').forEach((row) => {
+        const sel = row.querySelector('select').value;
+        if (sel !== '' && sel !== 'custom' && rate) row.querySelector('[data-bb=price]').value = r2(convert(Number(card.items[Number(sel)].price), cardCurrency(card), builder.dataset.cur, rate)).toFixed(2);
+      });
+      bbRecalc(builder);
+    }
     else if (key === 'bi-recalc') { bbRecalc(e.target.closest('[data-builder]')); }
     else if (key === 'stayFilter') { document.getElementById('guestSelect').innerHTML = '<option value="">Select guest and room</option>' + stayOptions(e.target.value); }
   });
@@ -2022,24 +2081,35 @@
       const form = e.target.form, cur = e.target.value, prev = e.target.dataset.prev || currency();
       e.target.dataset.prev = cur;
       form.querySelectorAll('[data-affix]').forEach((a) => { a.textContent = cur; });
+      const fxField = form.querySelector('[data-fx-field]');
+      if (fxField) { fxField.hidden = cur === currency(); fxField.querySelector('input').required = cur !== currency(); }
+      const rate = formRate(form);
       const amount = form.querySelector('[name=amount]'), dueEl = form.querySelector('[data-due]');
       if (amount && dueEl) {
-        const due = Number(dueEl.dataset.due) / 100, m = r2(convert(due, currency(), cur));
-        amount.max = m; amount.value = m.toFixed(2);
-      } else if (amount && amount.value) {
-        amount.value = r2(convert(Number(amount.value), prev, cur)).toFixed(2);
+        const due = Number(dueEl.dataset.due) / 100, m = rate ? r2(convert(due, currency(), cur, rate)) : NaN;
+        amount.removeAttribute('max');
+        amount.value = Number.isFinite(m) ? m.toFixed(2) : '';
+        if (Number.isFinite(m)) amount.max = m;
+      } else if (amount && amount.value && rate) {
+        amount.value = r2(convert(Number(amount.value), prev, cur, rate)).toFixed(2);
       }
       updateFxHint(form);
+      if (fxField && !fxField.hidden && !rate) fxField.querySelector('input').focus();
       return;
     }
     if (e.target.dataset.change === 'bb-cur') {
       const builder = e.target.closest('[data-builder]'), card = cardFor(builder.dataset.outlet);
-      const prev = builder.dataset.cur, cur = e.target.value, rate = cardRate(card);
+      const prev = builder.dataset.cur, cur = e.target.value;
+      const rateBox = builder.querySelector('.bb-rate');
+      if (rateBox) rateBox.hidden = cur === currency() && cardCurrency(card) === cur;
+      const rate = Number(builder.querySelector('[data-bb=rate]')?.value) || cardRate(card);
+      if (!rate && (cur !== cardCurrency(card) || prev !== cur)) { builder.dataset.cur = cur; builder.querySelector('[data-bb=rate]')?.focus(); }
       builder.dataset.cur = cur;
       builder.querySelectorAll('#bbRows .bb-row').forEach((row) => {
         const sel = row.querySelector('select').value, price = row.querySelector('[data-bb=price]');
-        if (sel !== '' && sel !== 'custom') price.value = r2(convert(Number(card.items[Number(sel)].price), cardCurrency(card), cur, rate)).toFixed(2);
-        else if (price.value) price.value = r2(convert(Number(price.value), prev, cur, rate)).toFixed(2);
+        const conv = (v, from) => { const x = r2(convert(v, from, cur, rate)); return Number.isFinite(x) ? x.toFixed(2) : ''; };
+        if (sel !== '' && sel !== 'custom') price.value = conv(Number(card.items[Number(sel)].price), cardCurrency(card));
+        else if (price.value) price.value = conv(Number(price.value), prev);
       });
       const unit = builder.querySelector('.bb-labels span:nth-child(3)');
       if (unit) unit.textContent = `Unit (${cur})`;
@@ -2052,7 +2122,11 @@
       const custom = row.querySelector('.bb-custom'), price = row.querySelector('[data-bb=price]');
       custom.hidden = v !== 'custom';
       if (v === 'custom') { price.value = ''; custom.focus(); }
-      else if (v !== '') price.value = r2(convert(Number(card.items[Number(v)].price), cardCurrency(card), builder.dataset.cur || cardCurrency(card), cardRate(card))).toFixed(2);
+      else if (v !== '') {
+        const rate = Number(builder.querySelector('[data-bb=rate]')?.value) || cardRate(card);
+        const x = r2(convert(Number(card.items[Number(v)].price), cardCurrency(card), builder.dataset.cur || cardCurrency(card), rate));
+        price.value = Number.isFinite(x) ? x.toFixed(2) : '';
+      }
       if (v !== '' && row === builder.querySelector('#bbRows .bb-row:last-child')) {
         builder.querySelector('#bbRows').insertAdjacentHTML('beforeend', bbRowHtml(card));
       }
