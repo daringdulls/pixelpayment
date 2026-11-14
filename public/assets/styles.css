@@ -441,7 +441,7 @@ tr:hover .row-arrow { color: var(--brand); }
 
 /* ---------- Print ---------- */
 @media print {
-  @page { margin: 16mm; }
+  @page { size: A4 portrait; margin: 12mm 12mm 14mm; }
   body { background: #fff; font-size: 12px; }
   .sidebar, .topbar, .page-head, .banner, .footer, .back-row, .page-actions, .toasts, .no-print, .scrim { display: none !important; }
   .main { margin: 0; }
@@ -711,4 +711,44 @@ tfoot td { padding: 12px 20px; font-weight: 700; color: var(--ink); background: 
   .st-lines thead th, .st-guest .st-due, .st-totals .grand, .brand-mark, .st-lines tr.st-pay td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .st-lines tr { break-inside: avoid; }
   .invoice-doc::before { display: none; }
+}
+
+/* =====================================================================
+ * Portrait A4 documents (screen preview matches the printed page)
+ * ===================================================================== */
+.statement-doc { max-width: 210mm; min-height: 297mm; margin: 0 auto; padding: 14mm 13mm 12mm; display: flex; flex-direction: column; }
+.statement-doc .st-foot { margin-top: auto; }
+.statement-doc .st-sign { margin-top: 36px; }
+.doc-modal { max-width: 210mm; }
+.invoice-doc { min-height: 297mm; padding: 14mm 13mm 12mm; display: flex; flex-direction: column; }
+.invoice-doc .inv-foot { margin-top: auto; }
+.st-guest { grid-template-columns: 1.2fr .9fr 1.4fr 1.3fr; }
+.st-lines tbody td.wrap { min-width: 0; }
+.st-bottom, .inv-bottom { grid-template-columns: 1fr 260px; gap: 28px; }
+@media (max-width: 760px) {
+  .statement-doc, .invoice-doc { min-height: 0; padding: 26px 16px; }
+  .st-bottom, .inv-bottom { grid-template-columns: 1fr; }
+}
+@media print {
+  html, body { width: auto; }
+  .statement-doc, .invoice-doc { max-width: none; min-height: 0; padding: 0; margin: 0; display: block; font-size: 10.5px; }
+  .st-head, .inv-head { padding-bottom: 14px; }
+  .st-brand h2, .inv-from h2 { font-size: 16px; }
+  .st-title h1, .inv-title h1 { font-size: 21px; }
+  .st-guest { margin: 14px 0 6px; }
+  .st-guest > div { padding: 9px 10px; }
+  .st-guest strong { font-size: 12.5px; } .st-guest .st-due strong { font-size: 14px; }
+  .st-lines thead th { padding: 7px 8px; font-size: 9px; }
+  .st-lines tbody td { padding: 7px 8px; font-size: 10.5px; }
+  .inv-lines tbody td { padding: 10px 10px; }
+  .st-bottom, .inv-bottom { grid-template-columns: 1fr 230px; gap: 20px; margin-top: 16px; }
+  .st-totals .grand, .inv-totals .grand { font-size: 13px; padding: 10px 12px; }
+  .st-sign { margin-top: 28px; }
+  .st-foot, .inv-foot { margin-top: 18px; font-size: 9.5px; }
+  .brand-logo { max-height: 52px; }
+  .brand-mark { width: 44px; height: 44px; font-size: 14px; }
+}
+@media print {
+  html, body, .app, .main, .content { background: #fff !important; }
+  .st-lines thead th, .inv-lines thead th { border-radius: 0 !important; }
 }
