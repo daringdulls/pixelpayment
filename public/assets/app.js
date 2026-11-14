@@ -54,6 +54,7 @@
     mapPin: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
     copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
     key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+    tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
     hash: '<path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="M16 3l-2 18"/>',
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -91,6 +92,8 @@
   let demoFull = null;      // full demo dataset (head office view)
   let demoRole = 'admin';   // demo: 'admin' or 'outlet'
   let usernameDomain = 'pixelpayment.local';
+  let rateCards = {};       // outlet_id -> { currency, fx_rate, items: [{ id, category, name, price }] }
+  let rateError = '';
 
   // Username logins are stored as <username>@<usernameDomain> in Supabase Auth.
   const isUsernameLogin = (email) => String(email || '').toLowerCase().endsWith('@' + usernameDomain);
@@ -110,6 +113,10 @@
     guestFilter: 'active',
     selectedStay: null,
     authMode: 'signin',
+    rateOutlet: null,
+    rateDraft: null,
+    rateDirty: false,
+    rateQuery: '',
   };
 
   // Attach the Supabase session to all /api calls.
@@ -273,6 +280,21 @@
     return { ...d, bills, payments: (d.payments || []).filter((p) => ids.has(p.bill_id)), outlets: (d.outlets || []).filter((o) => o.id === m.outlet_id) };
   }
 
+  async function loadRates() {
+    if (demo) return;
+    try {
+      const res = await fetch('/api/rates');
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Rate cards are unavailable.');
+      rateCards = Object.fromEntries((body.cards || []).map((c) => [String(c.outlet_id), c]));
+      rateError = '';
+    } catch (err) {
+      rateCards = {};
+      rateError = err.message;
+    }
+    if (!demo && ui.page === 'Rates' && !ui.rateDirty) { ui.rateDraft = null; render(); }
+  }
+
   async function load() {
     try {
       const res = await fetch('/api/data');
@@ -281,6 +303,7 @@
       liveData = scopeToRole(body);
       if (!demo) data = liveData;
       render();
+      loadRates();
     } catch (err) {
       if (err.status === 401) return renderAuth();
       root().innerHTML = `
@@ -305,11 +328,11 @@
     { group: 'Overview', items: [['Overview', 'overview', 'Dashboard']] },
     { group: 'Front office', items: [['Guests', 'guests', 'Guests & folios']] },
     { group: 'Finance', items: [['Invoices', 'invoices', 'Invoices'], ['Payments', 'payments', 'Payments']] },
-    { group: 'Operations', items: [['Outlets', 'outlets', 'Outlets'], ['Activity', 'activity', 'Activity log']] },
+    { group: 'Operations', items: [['Outlets', 'outlets', 'Outlets'], ['Rates', 'tag', 'Rate cards'], ['Activity', 'activity', 'Activity log']] },
     { group: 'Administration', items: [['Settings', 'settings', 'Settings']] },
   ];
   const NAV_OUTLET = [
-    { group: 'My outlet', items: [['Invoices', 'invoices', 'My bills'], ['Guests', 'guests', 'Guest lookup'], ['Payments', 'payments', 'Collections']] },
+    { group: 'My outlet', items: [['Invoices', 'invoices', 'My bills'], ['Rates', 'tag', 'Rate card'], ['Guests', 'guests', 'Guest lookup'], ['Payments', 'payments', 'Collections']] },
   ];
   const navFor = () => (isAdmin() ? NAV_ADMIN : NAV_OUTLET);
   const allowedPages = () => navFor().flatMap((g) => g.items.map((i) => i[0]));
@@ -322,6 +345,7 @@
         Invoices: ['My bills', `Every bill ${esc(myOutletName())} has posted to guest folios. Only your outlet’s bills are shown.`],
         Guests: ['Guest lookup', 'Find an in-house guest to post a bill. Balances show your outlet’s charges only.'],
         Payments: ['Collections', `Payments the front office has collected against ${esc(myOutletName())} bills.`],
+        Rates: ['Rate card', `The prices ${esc(myOutletName())} bills to guests. Items appear in the New bill dropdown.`],
       })[p];
     }
     return ({
@@ -332,6 +356,7 @@
       Outlets: ['Outlets', 'Billing performance and outstanding balances by outlet.'],
       Activity: ['Activity log', 'An audit trail of submissions, approvals and collections.'],
       Settings: ['Settings', 'Organisation details and staff access.'],
+      Rates: ['Rate cards', 'Each outlet’s price list. Outlets pick from these items when they build a bill.'],
     })[p];
   }
 
@@ -378,7 +403,7 @@
           </header>
           <main class="content" id="content">
             ${pageHeader()}
-            ${demo ? banner('demo', 'eye', demoRole === 'admin' ? 'Demo · viewing as head office' : 'Demo · viewing as outlet staff (Cozy Deck)', 'Switch roles to see what each user sees. Changes are disabled in the demo.',
+            ${demo ? banner('demo', 'eye', demoRole === 'admin' ? 'Demo · viewing as head office' : 'Demo · viewing as outlet staff (Cozy Scuba Club)', 'Switch roles to see what each user sees. Changes are disabled in the demo.',
               `<div class="chips" role="group" aria-label="View demo as"><button class="chip" aria-pressed="${demoRole === 'admin'}" data-act="demo-role" data-arg="admin">Head office</button><button class="chip" aria-pressed="${demoRole === 'outlet'}" data-act="demo-role" data-arg="outlet">Outlet staff</button></div><button class="btn sm" data-act="demo">Exit demo</button>`) : ''}
             ${!demo && !data.outlets.length ? banner('', 'building', 'Your workspace is ready', 'Add your first outlet to begin posting daily invoices.', isAdmin() ? `<button class="btn sm primary" data-act="form" data-arg="outlet">${icon('plus', 'sm')} Add outlet</button>` : '') : ''}
             ${pageBody()}
@@ -418,6 +443,7 @@
       case 'Payments': return paymentsView();
       case 'Outlets': return outletsView();
       case 'Activity': return activityView();
+      case 'Rates': return ratesView();
       default: return settingsView();
     }
   }
@@ -561,7 +587,7 @@
               <td>${fmtDate(b.date)}</td>
               <td><span class="primary-text mono">${esc(b.number)}</span></td>
               <td>${esc(outletName(b.outlet_id))}</td>
-              <td class="wrap">${esc(b.notes)}</td>
+              <td class="wrap">${esc(billSummary(b))}</td>
               <td class="r amount">${money(b.amount)}</td>
               <td class="r muted-amount">${money(outstanding(b))}</td>
               <td>${statusBadge(b)}</td>
@@ -838,6 +864,169 @@
   /* ------------------------------------------------------------------ *
    * Activity
    * ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------ *
+   * Rate cards
+   * ------------------------------------------------------------------ */
+  const rid = () => Math.random().toString(36).slice(2, 10);
+  const cardFor = (oid) => { const c = rateCards[String(oid)]; return c && Array.isArray(c.items) && c.items.length ? c : null; };
+  const cardCurrency = (c) => String(c?.currency || currency()).toUpperCase();
+  const cardFx = (c) => (cardCurrency(c) === currency() ? 1 : Number(c?.fx_rate) || 1);
+
+  // Itemised bills are stored as text lines in the bill description:  "2 × Fun Dive 1 @ USD 81.00"
+  const LINE_RE = /^(\d+(?:\.\d+)?)\s*×\s*(.+?)\s*@\s*(?:([A-Z]{3})\s+)?(-?[\d,]*\.?\d+)$/;
+  const FX_RE = /^Exchange rate: 1 ([A-Z]{3}) = ([\d.]+) ([A-Z]{3})$/;
+  function parseBillLines(notes) {
+    const items = [], text = [];
+    let fx = null;
+    for (const raw of String(notes || '').split(/\r?\n/)) {
+      const l = raw.trim();
+      if (!l) continue;
+      const m = LINE_RE.exec(l), f = FX_RE.exec(l);
+      if (m) items.push({ qty: Number(m[1]), name: m[2], cur: m[3] || '', unit: parseFloat(m[4].replace(/,/g, '')) });
+      else if (f) fx = { from: f[1], rate: Number(f[2]), to: f[3] };
+      else text.push(l);
+    }
+    return { items, text, fx };
+  }
+  function billSummary(b) {
+    const { items, text } = parseBillLines(b.notes);
+    if (!items.length) return text[0] || '';
+    const names = items.filter((i) => i.unit >= 0).map((i) => (i.qty !== 1 ? i.qty + ' × ' : '') + i.name);
+    return names.slice(0, 2).join(', ') + (names.length > 2 ? ` + ${names.length - 2} more` : '');
+  }
+  const toCents = (major) => Math.round(Number(major) * 100);
+  function parseMoneyCell(v) {
+    let t = String(v || '').trim().replace(/[$€£\s]|USD|MVR/gi, '').replace(/,/g, '');
+    let neg = false;
+    const m = /^\((.+)\)$/.exec(t);
+    if (m) { neg = true; t = m[1]; }
+    if (!/^-?\d*\.?\d+$/.test(t)) return null;
+    const n = parseFloat(t);
+    return neg ? -n : n;
+  }
+
+  function ratesOutletId() {
+    if (!isAdmin()) return data.outlets[0]?.id;
+    if (!ui.rateOutlet || !data.outlets.some((o) => o.id === ui.rateOutlet)) ui.rateOutlet = (data.outlets.find((o) => cardFor(o.id)) || data.outlets[0])?.id;
+    return ui.rateOutlet;
+  }
+  function rateDraftFor(oid) {
+    if (!ui.rateDraft || ui.rateDraft.outlet_id !== oid) {
+      const c = rateCards[String(oid)] || {};
+      ui.rateDraft = { outlet_id: oid, currency: cardCurrency(c), fx_rate: Number(c.fx_rate) || 1, items: (c.items || []).map((i) => ({ ...i, id: i.id || rid() })) };
+      ui.rateDirty = false;
+    }
+    return ui.rateDraft;
+  }
+
+  function ratesView() {
+    const oid = ratesOutletId();
+    if (!oid) return `<section class="card">${emptyState('outlets', 'No outlets yet', 'Add an outlet first, then set up its rate card.')}</section>`;
+    const d = rateDraftFor(oid);
+    const foreign = d.currency !== currency();
+    const updated = rateCards[String(oid)]?.updated_at;
+    return `
+      ${rateError && !demo ? banner('warn', 'alert', 'Rate cards are not available yet', esc(rateError)) : ''}
+      <section class="card">
+        <div class="toolbar">
+          ${isAdmin() ? `<select class="input" data-change="rateOutlet" aria-label="Outlet">${data.outlets.map((o) => `<option value="${esc(o.id)}" ${o.id === oid ? 'selected' : ''}>${esc(o.name)}${cardFor(o.id) ? ' · ' + cardFor(o.id).items.length + ' items' : ''}</option>`).join('')}</select>` : ''}
+          <div class="search">${icon('search', 'sm')}<input class="input" type="search" aria-label="Search items" placeholder="Search items or categories…" value="${esc(ui.rateQuery)}" data-input="rateQuery"></div>
+          <label class="inline-field">Prices in <input class="input" data-rate-meta="currency" value="${esc(d.currency)}" maxlength="3" aria-label="Price currency" style="width:70px;text-transform:uppercase"></label>
+          ${foreign ? `<label class="inline-field">1 ${esc(d.currency)} = <input class="input" type="number" step="0.0001" min="0.0001" data-rate-meta="fx_rate" value="${esc(d.fx_rate)}" aria-label="Exchange rate" style="width:96px"> ${esc(currency())}</label>` : ''}
+        </div>
+        ${foreign ? `<div class="rate-note">${icon('info', 'sm')} Bills are built in ${esc(d.currency)} and charged to the guest in ${esc(currency())} at this rate. The rate used is printed on each invoice.</div>` : ''}
+        <div class="table-wrap"><table class="rate-table">
+          <thead><tr><th style="width:28%">Category</th><th>Item</th><th class="r" style="width:160px">Price (${esc(d.currency)})</th><th style="width:52px"></th></tr></thead>
+          <tbody id="rateRows">${rateRowsHtml()}</tbody>
+        </table></div>
+        <datalist id="rateCats">${[...new Set(d.items.map((i) => i.category).filter(Boolean))].map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+        <div class="table-foot rate-foot">
+          <div class="btn-row">
+            <button class="btn sm" data-act="rate-add">${icon('plus', 'sm')} Add item</button>
+            <button class="btn sm" data-act="rate-paste">${icon('copy', 'sm')} Paste from sheet</button>
+          </div>
+          <div class="btn-row">
+            <span id="rateState" class="${ui.rateDirty ? 'dirty' : ''}">${rateStateText()}</span>
+            <button class="btn sm" data-act="rate-reset" ${ui.rateDirty ? '' : 'disabled'}>Discard</button>
+            <button class="btn sm primary" data-act="rate-save" id="rateSaveBtn">${icon('check', 'sm')} Save rate card</button>
+          </div>
+        </div>
+      </section>
+      ${updated ? `<p class="kpi-foot" style="margin-top:10px">Last saved ${esc(fmtDateTime(updated))}${rateCards[String(oid)]?.updated_by ? ' by ' + esc(loginName(rateCards[String(oid)].updated_by)) : ''}.</p>` : ''}`;
+  }
+  const rateStateText = () => `${ui.rateDraft.items.length} item${ui.rateDraft.items.length === 1 ? '' : 's'}${ui.rateDirty ? ' · unsaved changes' : ''}`;
+  function rateRowsHtml() {
+    const d = ui.rateDraft, q = ui.rateQuery.trim().toLowerCase();
+    const rows = d.items.map((it, idx) => ({ it, idx })).filter(({ it }) => !q || (it.name + ' ' + it.category).toLowerCase().includes(q));
+    if (!rows.length) {
+      return `<tr><td colspan="4">${d.items.length ? emptyState('search', 'No matching items', 'Try another search.')
+        : emptyState('tag', 'No prices yet', 'Add items one by one, or copy your price list from Google Sheets and use “Paste from sheet”.', `<button class="btn primary" data-act="rate-paste">${icon('copy', 'sm')} Paste from sheet</button>`)}</td></tr>`;
+    }
+    return rows.map(({ it, idx }) => `<tr>
+      <td><input class="input cell" list="rateCats" data-rate-idx="${idx}" data-rate-field="category" value="${esc(it.category || '')}" placeholder="e.g. Fun dives" maxlength="60" aria-label="Category"></td>
+      <td><input class="input cell" data-rate-idx="${idx}" data-rate-field="name" value="${esc(it.name || '')}" placeholder="Item name" maxlength="120" aria-label="Item name"></td>
+      <td class="r"><input class="input cell r num" type="number" step="0.01" data-rate-idx="${idx}" data-rate-field="price" value="${Number(it.price || 0).toFixed(2)}" aria-label="Price"></td>
+      <td class="r"><button class="btn ghost icon sm" data-act="rate-del" data-arg="${idx}" title="Remove" aria-label="Remove ${esc(it.name || 'item')}">${icon('x', 'sm')}</button></td>
+    </tr>`).join('');
+  }
+  function markRateDirty() {
+    ui.rateDirty = true;
+    const st = document.getElementById('rateState');
+    if (st) { st.textContent = rateStateText(); st.className = 'dirty'; }
+    const reset = document.querySelector('[data-act="rate-reset"]');
+    if (reset) reset.disabled = false;
+  }
+  async function saveRates() {
+    const d = ui.rateDraft;
+    d.items = d.items.filter((i) => String(i.name || '').trim() || Number(i.price));
+    const nameless = d.items.find((i) => !String(i.name || '').trim());
+    if (nameless) { render(); return toast('Every item needs a name.'); }
+    if (!/^[A-Z]{3}$/.test(d.currency)) return toast('Currency must be a 3-letter code, e.g. USD.');
+    if (d.currency !== currency() && !(Number(d.fx_rate) > 0)) return toast('Enter the exchange rate.');
+    if (!requireLive()) return;
+    const btn = document.getElementById('rateSaveBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await post('rates-save', { outlet_id: d.outlet_id, currency: d.currency, fx_rate: d.currency === currency() ? 1 : Number(d.fx_rate), items: d.items });
+      rateCards[String(d.outlet_id)] = res.card;
+      ui.rateDraft = null;
+      ui.rateDirty = false;
+      render();
+      toast('Rate card saved. New bills will use these prices.');
+    } catch (err) {
+      if (btn) btn.disabled = false;
+      toast(err.message);
+    }
+  }
+  function applyPaste(form) {
+    const d = ui.rateDraft;
+    const text = form.querySelector('[name=paste]').value;
+    const fallbackCat = form.querySelector('[name=paste_category]').value.trim();
+    const replace = form.querySelector('[name=paste_mode]:checked')?.value === 'replace';
+    const added = [];
+    for (const line of text.split(/\r?\n/)) {
+      const cells = line.split('\t').map((c) => c.trim());
+      const prices = cells.map(parseMoneyCell).filter((v) => v !== null);
+      const words = cells.filter((c) => c && parseMoneyCell(c) === null);
+      if (!prices.length || !words.length) continue;
+      if (/^(prices?|item|name|category)$/i.test(words[words.length - 1])) continue;
+      added.push({ id: rid(), category: words.length > 1 ? words[0] : fallbackCat, name: words[words.length - 1].slice(0, 120), price: prices[prices.length - 1] });
+    }
+    if (!added.length) {
+      form.querySelector('.form-error').innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>No rows with a name and a price were found. Copy the item and price columns from your sheet and paste them here.</span></div>`;
+      return;
+    }
+    d.items = replace ? added : d.items.concat(added);
+    ui.rateDirty = true;
+    ui.rateQuery = '';
+    closeOverlay();
+    render();
+    toast(`${added.length} item${added.length === 1 ? '' : 's'} added. Review them, then click Save rate card.`);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Activity
+   * ------------------------------------------------------------------ */
   function activityView() {
     const list = data.activity || [];
     return `<section class="card">
@@ -1007,9 +1196,8 @@
             <div class="search" style="margin-bottom:8px">${icon('search', 'sm')}<input class="input" type="search" placeholder="Filter by name, room or property…" data-input="stayFilter" aria-label="Filter guests"></div>
             <select id="guestSelect" name="stay_id" required><option value="">Select guest and room</option>${stayOptions()}</select>
           </label>
-          ${moneyField('Amount')}
           ${field('Due date', 'due', 'date', today())}
-          <label class="field wide"><span>Description</span><textarea name="notes" required maxlength="2000" rows="3" placeholder="e.g. Dinner for two – set menu&#10;Each line appears on the invoice"></textarea></label>
+          <div class="wide" id="billBody">${billBodyHtml(first)}</div>
         </div>`, footer(isAdmin() ? 'Submit invoice' : 'Submit bill'), 'bills');
     }
 
@@ -1081,6 +1269,90 @@
     }
   }
 
+  /* Bill body: an item builder from the outlet's rate card, or a plain amount + description. */
+  function billBodyHtml(oid) {
+    const card = cardFor(oid);
+    if (!card) {
+      return `<div class="form-grid">
+        ${moneyField('Amount', '', 'max="100000000"', 'wide')}
+        <label class="field wide"><span>Description</span><textarea name="notes" required maxlength="2000" rows="3" placeholder="e.g. Dinner for two – set menu&#10;Each line appears on the invoice"></textarea></label>
+        ${isAdmin() || data.outlets.length === 1 ? `<p class="hint-line wide">Tip: set up a rate card for this outlet to pick items from a price list instead.</p>` : ''}
+      </div>`;
+    }
+    const cur = cardCurrency(card);
+    return `<div class="bill-builder" data-builder data-outlet="${esc(oid)}">
+      <div class="bb-title"><strong>Items</strong><span class="hint-line">From the ${esc(outletName(oid))} rate card · prices in ${esc(cur)}</span></div>
+      <div class="bb-row bb-labels"><span>Item</span><span class="r">Qty</span><span class="r">Unit (${esc(cur)})</span><span class="r">Total</span><span></span></div>
+      <div id="bbRows">${bbRowHtml(card)}</div>
+      <button type="button" class="btn sm" data-act="bi-add">${icon('plus', 'sm')} Add item</button>
+      <div class="bb-foot">
+        <label class="inline-field">Discount <input class="input r" type="number" min="0" max="100" step="0.5" value="0" data-input="bi-recalc" data-bb="discount" aria-label="Discount percent" style="width:76px"> %</label>
+        <div class="bb-totals" id="bbTotals"></div>
+      </div>
+      <input type="hidden" name="amount" id="bbAmount" value="">
+      <label class="field"><span>Notes <span class="hint">· optional, printed on the invoice</span></span><textarea name="notes" rows="2" maxlength="400" placeholder="e.g. Dive sites, equipment sizes, instructor"></textarea></label>
+    </div>`;
+  }
+  function bbOptions(card) {
+    const groups = new Map();
+    card.items.forEach((it, i) => { const g = it.category || 'Other'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push([it, i]); });
+    return '<option value="">Choose an item…</option>'
+      + [...groups].map(([g, list]) => `<optgroup label="${esc(g)}">${list.map(([it, i]) => `<option value="${i}">${esc(it.name)} — ${money(toCents(it.price))}</option>`).join('')}</optgroup>`).join('')
+      + '<option value="custom">Other / custom item…</option>';
+  }
+  const bbRowHtml = (card) => `<div class="bb-row">
+      <div class="bb-item"><select class="input" data-change="bi-item" aria-label="Item">${bbOptions(card)}</select><input class="input bb-custom" placeholder="Describe the item" maxlength="120" hidden aria-label="Custom item name"></div>
+      <input class="input r" type="number" min="1" step="1" value="1" data-input="bi-recalc" data-bb="qty" aria-label="Quantity">
+      <input class="input r" type="number" step="0.01" value="" placeholder="0.00" data-input="bi-recalc" data-bb="price" aria-label="Unit price">
+      <span class="bb-line num">0.00</span>
+      <button type="button" class="btn ghost icon sm" data-act="bi-remove" aria-label="Remove item">${icon('x', 'sm')}</button>
+    </div>`;
+  function bbState(builder) {
+    const card = cardFor(builder.dataset.outlet);
+    const cur = cardCurrency(card), fx = cardFx(card);
+    const rows = [...builder.querySelectorAll('#bbRows .bb-row')].map((row) => {
+      const sel = row.querySelector('select').value;
+      const custom = row.querySelector('.bb-custom');
+      const qty = Number(row.querySelector('[data-bb=qty]').value) || 0;
+      const price = Number(row.querySelector('[data-bb=price]').value) || 0;
+      const name = sel === 'custom' ? custom.value.trim() : sel !== '' ? card.items[Number(sel)].name : '';
+      return { row, sel, name, qty, price, line: Math.round(qty * price * 100) / 100 };
+    });
+    const used = rows.filter((r) => r.sel !== '');
+    const subtotal = used.reduce((t, r) => t + r.line, 0);
+    const pct = Math.min(100, Math.max(0, Number(builder.querySelector('[data-bb=discount]').value) || 0));
+    const discount = Math.round(subtotal * pct) / 100;
+    const net = Math.round((subtotal - discount) * 100) / 100;
+    return { card, cur, fx, rows, used, subtotal, pct, discount, net, charged: Math.round(net * fx * 100) / 100 };
+  }
+  function bbRecalc(builder) {
+    const st = bbState(builder);
+    st.rows.forEach((r) => { r.row.querySelector('.bb-line').textContent = money(toCents(r.line)); });
+    builder.querySelector('#bbAmount').value = st.charged > 0 ? st.charged.toFixed(2) : '';
+    const foreign = st.cur !== currency();
+    builder.querySelector('#bbTotals').innerHTML = `
+      <div><span>Subtotal</span><span>${esc(st.cur)} ${money(toCents(st.subtotal))}</span></div>
+      ${st.pct ? `<div><span>Discount ${st.pct}%</span><span>− ${esc(st.cur)} ${money(toCents(st.discount))}</span></div>` : ''}
+      ${foreign ? `<div><span>Total</span><span>${esc(st.cur)} ${money(toCents(st.net))}</span></div><div class="bb-fx"><span>at 1 ${esc(st.cur)} = ${esc(st.fx)} ${esc(currency())}</span></div>` : ''}
+      <div class="grand"><span>Charge to guest</span><span>${esc(currency())} ${money(toCents(st.charged))}</span></div>`;
+  }
+  function bbCompose(form) {
+    const builder = form.querySelector('[data-builder]');
+    const st = bbState(builder);
+    if (!st.used.length) return 'Add at least one item.';
+    const unnamed = st.used.find((r) => !r.name);
+    if (unnamed) return 'Describe the custom item.';
+    if (st.used.some((r) => !(r.qty > 0))) return 'Quantities must be at least 1.';
+    if (!(st.charged > 0)) return 'The bill total must be more than zero.';
+    const lines = st.used.map((r) => `${r.qty} × ${r.name.replace(/\s*@\s*/g, ' at ')} @ ${st.cur} ${r.price.toFixed(2)}`);
+    if (st.pct) lines.push(`1 × Discount ${st.pct}% @ ${st.cur} -${st.discount.toFixed(2)}`);
+    if (st.cur !== currency()) lines.push(`Exchange rate: 1 ${st.cur} = ${st.fx} ${currency()}`);
+    const extra = form.querySelector('[name=notes]').value.trim();
+    const notes = lines.join('\n') + (extra ? '\n' + extra : '');
+    if (notes.length > 2000) return 'Too many items for one bill. Split it into two bills.';
+    return { notes, amount: st.charged.toFixed(2) };
+  }
+
   async function post(action, body) {
     const res = await fetch('/api/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const json = await res.json().catch(() => ({}));
@@ -1096,8 +1368,17 @@
     if (!form.reportValidity()) return;
     const values = Object.fromEntries(new FormData(form));
     if (name === 'settings') values.currency = values.currency.toUpperCase();
+    if (name === 'rates-paste') return applyPaste(form);
     if (name === 'bills') {
       delete values.num_mode;
+      if (form.querySelector('[data-builder]')) {
+        const composed = bbCompose(form);
+        if (typeof composed === 'string') {
+          errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(composed)}</span></div>`;
+          return;
+        }
+        Object.assign(values, composed);
+      }
       values.number = String(values.number || '').trim();
       if (data.bills.some((b) => b.outlet_id === values.outlet_id && String(b.number).toLowerCase() === values.number.toLowerCase())) {
         errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Bill number ${esc(values.number)} already exists for this outlet.</span></div>`;
@@ -1128,6 +1409,10 @@
     const pays = data.payments.filter((p) => p.bill_id === id).sort((a, c) => (a.date || '').localeCompare(c.date || ''));
     const paid = paidFor(id), due = outstanding(b), status = billStatus(b);
     const lines = String(b.notes || 'Outlet charges').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const parsed = parseBillLines(b.notes);
+    const itemCur = parsed.items[0]?.cur || currency();
+    const foreign = parsed.items.length && itemCur !== currency();
+    const itemTotal = parsed.items.reduce((t, i) => t + Math.round(i.qty * i.unit * 100), 0);
     let primary = '';
     if (isAdmin() && b.status === 'pending') primary = `<button class="btn sm primary" data-act="approve" data-arg="${esc(id)}" id="approveBtn">${icon('check', 'sm')} Approve</button>`;
     else if (isAdmin() && due > 0) primary = `<button class="btn sm primary" data-act="form" data-arg="payment" data-arg2="${esc(id)}">${icon('payments', 'sm')} Record payment</button>`;
@@ -1174,19 +1459,25 @@
             <p>Settled on the guest’s consolidated bill</p><p>Status: ${esc(status)}</p></div>
         </section>
         <table class="inv-lines">
-          <thead><tr><th class="c-no">#</th><th>Description</th><th class="r c-qty">Qty</th><th class="r c-amt">Unit price</th><th class="r c-amt">Amount</th></tr></thead>
+          <thead><tr><th class="c-no">#</th><th>Description</th><th class="r c-qty">Qty</th><th class="r c-amt">Unit price${foreign ? ' (' + esc(itemCur) + ')' : ''}</th><th class="r c-amt">Amount${foreign ? ' (' + esc(itemCur) + ')' : ''}</th></tr></thead>
           <tbody>
-            <tr><td>1</td><td><strong>${esc(lines[0])}</strong>${lines.slice(1).map((l) => `<div class="inv-sub">${esc(l)}</div>`).join('')}</td>
-              <td class="r">1</td><td class="r">${money(b.amount)}</td><td class="r">${money(b.amount)}</td></tr>
+            ${parsed.items.length ? parsed.items.map((it, i) => `<tr class="${it.unit < 0 ? 'inv-discount' : ''}"><td>${i + 1}</td><td><strong>${esc(it.name)}</strong></td>
+              <td class="r">${esc(it.qty)}</td><td class="r">${money(Math.round(it.unit * 100))}</td><td class="r">${money(Math.round(it.qty * it.unit * 100))}</td></tr>`).join('')
+            : `<tr><td>1</td><td><strong>${esc(lines[0])}</strong>${lines.slice(1).map((l) => `<div class="inv-sub">${esc(l)}</div>`).join('')}</td>
+              <td class="r">1</td><td class="r">${money(b.amount)}</td><td class="r">${money(b.amount)}</td></tr>`}
           </tbody>
         </table>
+        ${parsed.items.length && parsed.text.length ? `<div class="inv-remarks"><h4>Notes</h4>${parsed.text.map((l) => `<p>${esc(l)}</p>`).join('')}</div>` : ''}
         <div class="inv-bottom">
           <div class="inv-notes">
             <h4>Payments received</h4>
             ${pays.length ? `<table class="inv-pays"><tbody>${pays.map((p) => `<tr><td>${fmtDate(p.date)}</td><td>${esc(p.method)}</td><td class="mono">${esc(p.reference)}</td><td class="r">${money(p.amount)}</td></tr>`).join('')}</tbody></table>` : '<p>No payments recorded yet.</p>'}
           </div>
           <div class="inv-totals">
-            <div><span>Subtotal</span><span>${money(b.amount)}</span></div>
+            ${foreign ? `<div><span>Subtotal (${esc(itemCur)})</span><span>${money(itemTotal)}</span></div>
+            <div class="inv-fx"><span>Exchange rate</span><span>1 ${esc(itemCur)} = ${esc(parsed.fx?.rate ?? '—')} ${esc(currency())}</span></div>
+            <div><span>Invoice total (${esc(currency())})</span><span>${money(b.amount)}</span></div>`
+            : `<div><span>Subtotal</span><span>${money(b.amount)}</span></div>`}
             <div><span>Payments received</span><span>− ${money(paid)}</span></div>
             <div class="grand"><span>Balance due</span><span>${esc(currency())} ${money(due)}</span></div>
           </div>
@@ -1256,6 +1547,8 @@
     demo = !demo;
     closeOverlay();
     if (!demo) {
+      rateCards = {}; ui.rateDraft = null; ui.rateDirty = false; ui.rateOutlet = null;
+      loadRates();
       if (!liveData) return renderAuth();
       data = liveData;
       ui.selectedStay = null;
@@ -1280,11 +1573,11 @@
     const bills = [
       mk('b1', 'CN-001', 'd1', 'g1a7c2e4', 'Emma Wilson', 350000, 'Guest house accommodation · 4 nights', d(-3)),
       mk('b2', 'CD-042', 'd2', 'g1a7c2e4', 'Emma Wilson', 85000, 'Dinner at Cozy Deck', d(-2)),
-      mk('b3', 'CSC-018', 'd3', 'g1a7c2e4', 'Emma Wilson', 220000, 'Two-tank dive with equipment', d(-1)),
+      mk('b3', 'CSC-018', 'd3', 'g1a7c2e4', 'Emma Wilson', 249804, '1 × Fun Dive 1 @ USD 81.00\n1 × Fun Dive 2 @ USD 71.00\n2 × Equipment charge BCD / REG / COMP @ USD 5.00\nExchange rate: 1 USD = 15.42 MVR\nRasdhoo Madivaru · Tiger Point', d(-1)),
       mk('b4', 'CG-009', 'd4', 'g2b8d3f5', 'James Carter', 45000, 'Souvenirs and gifts', d(-1)),
       mk('b5', 'CD-047', 'd2', 'g2b8d3f5', 'James Carter', 62000, 'Sunset dinner · set menu', t, 'pending'),
       mk('b6', 'CN-004', 'd1', 'g3c9e4a6', 'Sofia Martín', 260000, 'Guest house accommodation · 4 nights', d(-2)),
-      mk('b7', 'CSC-021', 'd3', 'g3c9e4a6', 'Sofia Martín', 140000, 'Snorkel excursion', d(-1), 'approved', d(-1)),
+      mk('b7', 'CSC-021', 'd3', 'g3c9e4a6', 'Sofia Martín', 225132, '1 × Tiger shark Dive @ USD 96.00\n1 × GoPro rental @ USD 50.00\nExchange rate: 1 USD = 15.42 MVR', d(-1), 'approved', d(-1)),
       mk('b8', 'CN-002', 'd1', 'g4d0f5b7', 'Liam Becker', 420000, 'Guest house accommodation · 5 nights', d(-6)),
       mk('b9', 'CD-038', 'd2', 'g4d0f5b7', 'Liam Becker', 54000, 'Lunch and drinks', d(-4)),
     ];
@@ -1311,11 +1604,37 @@
       members: [
         { email: 'demo@pixelpayment.app', role: 'admin' },
         { email: 'deck.cashier@' + usernameDomain, role: 'outlet', outlet_id: 'd2' },
-        { email: 'scuba@cozy.example', role: 'outlet', outlet_id: 'd3' },
+        { email: 'scuba.desk@' + usernameDomain, role: 'outlet', outlet_id: 'd3' },
       ],
     };
+    rateCards = demoRateCards();
+    ui.rateDraft = null; ui.rateDirty = false; ui.rateOutlet = null;
     demoRole = 'admin';
     applyDemoRole();
+  }
+
+  function demoRateCards() {
+    const scuba = [
+      ['Fun dives', 'Fun Dive 1', 81], ['Fun dives', 'Fun Dive 2', 71], ['Fun dives', 'Fun Dive 3-6', 76], ['Fun dives', 'Fun Dive 7', 41],
+      ['Fun dives', 'Fun Dive 8-12', 71], ['Fun dives', 'Fun Dive 13', 6], ['Fun dives', 'Fun Dive 14-20', 66], ['Fun dives', 'Fun Dive 21', -39], ['Fun dives', 'Fun Dive 21+', 61],
+      ['Try dives & refreshers', 'DSD', 100], ['Try dives & refreshers', 'DS (not completed DSD)', 50], ['Try dives & refreshers', '2nd DSD', 81],
+      ['Try dives & refreshers', 'Scuba Review', 90], ['Try dives & refreshers', 'Reactivate', 95],
+      ['Equipment & rental', 'Equipment charge BCD / REG / COMP', 5], ['Equipment & rental', 'Equipment charge mask and fins', 5], ['Equipment & rental', '15L Tank', 5], ['Equipment & rental', 'GoPro rental', 50],
+      ['Private & special dives', 'Private guide/dive', 100], ['Private & special dives', 'Private tiger shark', 200], ['Private & special dives', 'Tiger shark Dive', 96], ['Private & special dives', 'Free Diving', 145],
+      ['Course dives', 'PADI Advanced Course Dive', 174.81], ['Course dives', 'PADI Adventure Dive', 216.92],
+      ['Courses', 'Open water course', 650], ['Courses', 'Advance Course', 500], ['Courses', 'Rescue', 500], ['Courses', 'Divemaster', 1500],
+      ['Courses', 'Nitrox', 350], ['Courses', 'Deep Spec.', 350], ['Courses', 'Digital U/W imaging spec.', 350],
+      ['Packages', 'Thrilling Shark Dive 4N/6D', 1392], ['Packages', 'Discovery package 5N/9D', 1682], ['Packages', 'Adventure package 6N/12D', 1875],
+      ['Packages', 'Exploring package 7N/15D', 2208], ['Packages', 'Advance package 8N/18D', 2541], ['Packages', 'Super package 9N/12D', 2874],
+      ['Dive insurance', 'Dive insurance – 1 day', 18], ['Dive insurance', 'Dive insurance – 3 days', 23], ['Dive insurance', 'Dive insurance – 5 days', 30],
+      ['Dive insurance', 'Dive insurance – 7 days', 35], ['Dive insurance', 'Dive insurance – 10 days', 40], ['Dive insurance', 'Dive insurance – 14 days', 55],
+    ];
+    const deck = [['Food', 'Sunset set menu', 620], ['Food', 'Lunch', 270], ['Drinks', 'Fresh juice', 75], ['Drinks', 'Soft drink', 45], ['Drinks', 'Mocktail', 150]];
+    const mkItems = (list) => list.map(([category, name, price]) => ({ id: rid(), category, name, price }));
+    return {
+      d3: { outlet_id: 'd3', currency: 'USD', fx_rate: 15.42, items: mkItems(scuba), updated_at: new Date().toISOString(), updated_by: 'scuba.desk@' + usernameDomain },
+      d2: { outlet_id: 'd2', currency: 'MVR', fx_rate: 1, items: mkItems(deck), updated_at: new Date().toISOString(), updated_by: 'demo@pixelpayment.app' },
+    };
   }
 
   // Demo only: mimic what the backend returns for an outlet staff member (Cozy Deck).
@@ -1323,17 +1642,17 @@
     if (demoRole === 'admin') {
       data = demoFull;
     } else {
-      const outletId = 'd2';
+      const outletId = 'd3';
       const bills = demoFull.bills.filter((b) => b.outlet_id === outletId);
       const ids = new Set(bills.map((b) => b.id));
       data = {
         ...demoFull,
         member: { role: 'outlet', outlet_id: outletId },
-        email: 'deck.cashier@' + usernameDomain,
+        email: 'scuba.desk@' + usernameDomain,
         outlets: demoFull.outlets.filter((o) => o.id === outletId),
         bills,
         payments: demoFull.payments.filter((p) => ids.has(p.bill_id)),
-        activity: demoFull.activity.filter((a) => /Cozy Deck|CD-/.test(a.entity)),
+        activity: demoFull.activity.filter((a) => /Scuba|CSC-/.test(a.entity)),
         members: [],
       };
     }
@@ -1380,7 +1699,7 @@
     },
     export: exportCsv,
     close: closeOverlay,
-    form: (arg, el) => openForm(arg, el.dataset.arg2),
+    form: (arg, el) => { openForm(arg, el.dataset.arg2); const bld = document.querySelector('#modal [data-builder]'); if (bld) bbRecalc(bld); },
     invoice: openInvoice,
     approve,
     guest: (id) => { ui.selectedStay = id; render(); window.scrollTo(0, 0); },
@@ -1396,6 +1715,36 @@
     print: () => printWith(''),
     'print-drawer': () => printWith('printing-drawer'),
     'print-doc': () => printWith('printing-doc'),
+    'rate-add': () => {
+      const d = ui.rateDraft;
+      d.items.push({ id: rid(), category: d.items[d.items.length - 1]?.category || '', name: '', price: 0 });
+      ui.rateQuery = ''; ui.rateDirty = true; render();
+      const inputs = document.querySelectorAll('[data-rate-field=name]');
+      inputs[inputs.length - 1]?.focus();
+    },
+    'rate-del': (idx) => { ui.rateDraft.items.splice(Number(idx), 1); ui.rateDirty = true; render(); },
+    'rate-reset': () => { ui.rateDraft = null; ui.rateDirty = false; render(); },
+    'rate-save': () => saveRates(),
+    'rate-paste': () => modal('Paste from sheet', 'Copy rows from Google Sheets or Excel (item and price columns) and paste them below.',
+      `<label class="field"><span>Rows</span><textarea name="paste" rows="9" class="mono-area" placeholder="Fun Dive 1&#9;$ 81.00&#10;Fun Dive 2&#9;$ 71.00&#10;Equipment charge mask and Fins&#9;$ 5.00" required></textarea></label>
+      <p class="hint-line">Columns can be <b>Item · Price</b> or <b>Category · Item · Price</b>. If there are two price columns, the last one is used. Prices like $1,392.00 and (39.00) are understood.</p>
+      <label class="field"><span>Category for rows without one <span class="hint">· optional</span></span><input name="paste_category" list="rateCats" placeholder="e.g. Fun dives" maxlength="60"></label>
+      <div class="seg" role="radiogroup" aria-label="Paste mode">
+        <label><input type="radio" name="paste_mode" value="append" checked><span>Add to current list</span></label>
+        <label><input type="radio" name="paste_mode" value="replace"><span>Replace current list</span></label>
+      </div>`, footer('Add items'), 'rates-paste'),
+    'bi-add': (_, el) => {
+      const builder = el.closest('[data-builder]');
+      builder.querySelector('#bbRows').insertAdjacentHTML('beforeend', bbRowHtml(cardFor(builder.dataset.outlet)));
+      builder.querySelector('#bbRows .bb-row:last-child select').focus();
+    },
+    'bi-remove': (_, el) => {
+      const builder = el.closest('[data-builder]');
+      const rows = builder.querySelectorAll('#bbRows .bb-row');
+      if (rows.length > 1) el.closest('.bb-row').remove();
+      else el.closest('.bb-row').outerHTML = bbRowHtml(cardFor(builder.dataset.outlet));
+      bbRecalc(builder);
+    },
   };
 
   document.addEventListener('click', (e) => {
@@ -1407,16 +1756,49 @@
   });
 
   document.addEventListener('input', (e) => {
+    const rf = e.target.dataset.rateField;
+    if (rf && ui.rateDraft) {
+      const it = ui.rateDraft.items[Number(e.target.dataset.rateIdx)];
+      if (it) { it[rf] = rf === 'price' ? (parseFloat(e.target.value) || 0) : e.target.value; markRateDirty(); }
+      return;
+    }
+    const rm = e.target.dataset.rateMeta;
+    if (rm && ui.rateDraft) {
+      ui.rateDraft[rm] = rm === 'currency' ? e.target.value.trim().toUpperCase() : (parseFloat(e.target.value) || 0);
+      markRateDirty();
+      return;
+    }
     const key = e.target.dataset.input;
     if (!key) return;
     if (key === 'search') { ui.search = e.target.value; updateInvoiceRows(); }
     else if (key === 'guestQuery') { ui.guestQuery = e.target.value; document.getElementById('guestRows').innerHTML = guestRows(); }
+    else if (key === 'rateQuery') { ui.rateQuery = e.target.value; document.getElementById('rateRows').innerHTML = rateRowsHtml(); }
+    else if (key === 'bi-recalc') { bbRecalc(e.target.closest('[data-builder]')); }
     else if (key === 'stayFilter') { document.getElementById('guestSelect').innerHTML = '<option value="">Select guest and room</option>' + stayOptions(e.target.value); }
   });
 
   document.addEventListener('change', (e) => {
     if (e.target.dataset.change === 'outletFilter') { ui.outletFilter = e.target.value; updateInvoiceRows(); }
+    if (e.target.dataset.rateMeta === 'currency') { render(); return; }
+    if (e.target.dataset.change === 'rateOutlet') {
+      if (ui.rateDirty && !confirm('Discard unsaved changes to this rate card?')) { e.target.value = ui.rateOutlet; return; }
+      ui.rateOutlet = e.target.value; ui.rateDraft = null; ui.rateDirty = false; ui.rateQuery = ''; render(); return;
+    }
+    if (e.target.dataset.change === 'bi-item') {
+      const row = e.target.closest('.bb-row'), builder = e.target.closest('[data-builder]');
+      const card = cardFor(builder.dataset.outlet), v = e.target.value;
+      const custom = row.querySelector('.bb-custom'), price = row.querySelector('[data-bb=price]');
+      custom.hidden = v !== 'custom';
+      if (v === 'custom') { price.value = ''; custom.focus(); }
+      else if (v !== '') price.value = Number(card.items[Number(v)].price).toFixed(2);
+      if (v !== '' && row === builder.querySelector('#bbRows .bb-row:last-child')) {
+        builder.querySelector('#bbRows').insertAdjacentHTML('beforeend', bbRowHtml(card));
+      }
+      bbRecalc(builder);
+    }
     if (e.target.dataset.change === 'billOutlet') {
+      const body = document.getElementById('billBody');
+      if (body) { body.innerHTML = billBodyHtml(e.target.value); const bld = body.querySelector('[data-builder]'); if (bld) bbRecalc(bld); }
       const n = document.getElementById('invoiceNumber');
       const auto = e.target.form.querySelector('[name=num_mode]:checked')?.value !== 'own';
       if (n && auto) n.value = nextInvoiceNumber(e.target.value);

@@ -561,3 +561,56 @@ tfoot td { padding: 12px 20px; font-weight: 700; color: var(--ink); background: 
 .doc-stamp { top: 236px; right: 30%; }
 .field input[readonly]:not(#invoiceNumber) { font-family: var(--font); font-size: 14px; }
 @media print { body.printing-doc { background: #fff; } body.printing-doc .doc-stamp { top: 200px; } }
+
+/* =====================================================================
+ * Rate cards & itemised bills
+ * ===================================================================== */
+.inline-field { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.inline-field .input { height: 36px; }
+.rate-note { display: flex; gap: 8px; align-items: center; padding: 10px 20px; font-size: 12.5px; color: #1d4f86; background: var(--blue-bg); border-bottom: 1px solid var(--line-2); }
+.rate-table tbody td { padding: 6px 12px; }
+.rate-table thead th { padding-left: 12px; padding-right: 12px; }
+.input.cell { border-color: transparent; box-shadow: none; background: transparent; padding: 7px 8px; height: 36px; }
+.input.cell:hover { border-color: var(--line); background: var(--surface); }
+.input.cell:focus { border-color: var(--brand); background: var(--surface); box-shadow: 0 0 0 3px rgba(14,107,85,.14); }
+.input.r, input.r { text-align: right; }
+.rate-foot { align-items: center; }
+.btn-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#rateState.dirty { color: var(--amber); font-weight: 600; }
+.mono-area { font-family: var(--mono); font-size: 12.5px; white-space: pre; }
+
+.modal:has([data-builder]) { max-width: 760px; }
+.bill-builder { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--surface-2); }
+.bb-title { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.bb-title strong { font-size: 13.5px; color: var(--ink-2); }
+.bb-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 104px 96px 32px; gap: 8px; align-items: center; }
+#bbRows { display: grid; gap: 8px; }
+.bb-row .input { height: 36px; padding: 6px 10px; font-size: 13.5px; width: 100%; }
+.bb-item { display: grid; gap: 6px; min-width: 0; }
+.bb-labels { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.bb-line { text-align: right; font-weight: 600; color: var(--ink); font-size: 13.5px; }
+.bb-foot { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; border-top: 1px dashed var(--line); padding-top: 12px; }
+.bb-totals { min-width: 260px; display: grid; gap: 4px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.bb-totals div { display: flex; justify-content: space-between; gap: 16px; color: var(--muted); }
+.bb-totals div span:last-child { color: var(--ink-2); }
+.bb-totals .bb-fx span { font-size: 12px; color: var(--faint); }
+.bb-totals .grand { margin-top: 4px; padding: 9px 12px; background: var(--navy); border-radius: 8px; color: #fff; font-weight: 700; font-size: 14.5px; }
+.bb-totals .grand span, .bb-totals .grand span:last-child { color: #fff; }
+.bill-builder .field textarea { min-height: 60px; }
+.inv-discount td { color: var(--green) !important; }
+.inv-remarks { margin-top: 14px; font-size: 12.5px; color: var(--ink-2); }
+.inv-remarks h4 { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.inv-totals .inv-fx span { font-size: 12px; }
+@media (max-width: 640px) {
+  .bb-row { grid-template-columns: minmax(0, 1fr) 56px 88px 28px; }
+  .bb-row .bb-line { display: none; }
+  .bb-labels span:nth-child(4) { display: none; }
+  .bb-totals { min-width: 0; width: 100%; }
+}
+.bill-builder > .btn { justify-self: start; }
+@media (max-width: 640px) {
+  .bb-labels { display: none; }
+  .bb-row { grid-template-columns: 64px minmax(0, 1fr) 32px; padding-bottom: 8px; border-bottom: 1px dashed var(--line); }
+  .bb-row .bb-item { grid-column: 1 / -1; }
+  .bb-row .bb-line { display: none; }
+}

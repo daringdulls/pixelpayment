@@ -35,5 +35,19 @@ Head office can add users in **Settings → Staff & logins → Add user**:
 
 The key icon on each user resets their password. The server only allows this for administrators and only for members of this workspace.
 
+## Rate cards & itemised bills
+Each outlet can keep a price list (**Rate card** in the menu). When an outlet has one, **New bill** becomes an item picker:
+choose items from the dropdown, set quantities, add a discount % or a custom item, and the total is calculated.
+- Prices can be in another currency (e.g. Cozy Scuba Club in USD). The card stores the exchange rate to the workspace
+  currency; the invoice shows the lines in that currency, the rate used and the charged total.
+- Items are saved in the bill description as lines like `2 × Fun Dive 1 @ USD 81.00`, so no change to the existing bills
+  table is needed. The invoice and folio read these lines back.
+- Outlet staff edit their own outlet's card; head office can edit any outlet's card.
+- **Paste from sheet** imports rows copied from Google Sheets (`Item · Price` or `Category · Item · Price`).
+  `docs/cozy-scuba-club-rates.tsv` holds the Cozy Scuba Club price list ready to paste.
+
+**One-time setup:** run `supabase/migrations/20261114120000_pixel_rate_cards.sql` in the Supabase SQL editor.
+It creates `public.pixel_rate_cards` with RLS on and no public access; only the Vercel API (secret key) reads and writes it.
+
 ## API used by the frontend
-`GET /api/config`, `GET /api/data`, `POST /api/{staff-create|staff-reset|stays|outlets|bills|members|payments|settle|settings|approve|approve-stay|checkout|link-bill}`
+`GET /api/config`, `GET /api/data`, `GET /api/rates`, `POST /api/{rates-save|staff-create|staff-reset|stays|outlets|bills|members|payments|settle|settings|approve|approve-stay|checkout|link-bill}`
