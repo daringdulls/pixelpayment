@@ -38,6 +38,8 @@ The key icon on each user resets their password. The server only allows this for
 
 After **Add user** or **Reset password**, a *Login details* card shows the username, the temporary password and a login link (`/?u=<username>`, which fills in the username on the sign-in page). Each one has its own Copy button. **Copy all details** copies a ready-to-send message, and the **WhatsApp** and **Email** buttons open it in those apps. The password is generated for you and shown only once. Staff change their own password from the key icon next to their name in the sidebar.
 
+To rename a username login, click the pencil next to it in **Settings → Staff & logins**. The sign-in account and the role/outlet assignment move together; the password, role and past invoices stay the same, and you get the new login details to send. Email logins can't be renamed. This needs the same one-time `pixel_bill_admin` SQL script (it includes `pixel_member_rename`).
+
 ## Rate cards & itemised bills
 Each outlet can keep a price list (**Rate card** in the menu). When an outlet has one, **New bill** becomes an item picker:
 choose items from the dropdown, set quantities, add a discount % or a custom item, and the total is calculated.

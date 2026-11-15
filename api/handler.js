@@ -13,7 +13,7 @@ export default async function handler(req,res){
  if(!['GET','POST'].includes(req.method))return res.status(405).json({error:'Method not allowed.'});
  const origin=req.headers.origin,host=req.headers.host;
  if(req.method==='POST'&&(!origin||new URL(origin).host!==host))return res.status(403).json({error:'Invalid request origin.'});
- if(path==='/api/staff-create'||path==='/api/staff-reset')return staff(req,res,path,{endpoint,key,domain});
+ if(path==='/api/staff-create'||path==='/api/staff-reset'||path==='/api/staff-rename')return staff(req,res,path,{endpoint,key,domain});
  if(path==='/api/rates'||path==='/api/rates-save')return rates(req,res,path,{endpoint,key});
  if(path==='/api/branding'||path==='/api/branding-save')return branding(req,res,path,{endpoint,key});
  if(['/api/bill-update','/api/bill-delete','/api/payment-update','/api/payment-void','/api/stay-reopen','/api/stay-delete'].includes(path))return bills(req,res,path,{endpoint,key});

@@ -1313,6 +1313,7 @@
           <span class="avatar">${esc(initials(loginName(m.email)))}</span>
           <div class="grow"><strong>${esc(loginName(m.email))}</strong><small>${isUsernameLogin(m.email) ? 'Username login' : 'Email login'} · ${m.role === 'admin' ? 'All outlets' : esc(outletName(m.outlet_id))}</small></div>
           <span class="badge ${m.role === 'admin' ? 'info' : 'neutral'}">${m.role === 'admin' ? 'Admin' : 'Outlet'}</span>
+          ${isUsernameLogin(m.email) ? `<button class="btn ghost icon sm" data-act="form" data-arg="user-rename" data-arg2="${esc(m.email)}" title="Change username" aria-label="Change username for ${esc(loginName(m.email))}">${icon('pencil', 'sm')}</button>` : ''}
           <button class="btn ghost icon sm" data-act="form" data-arg="reset" data-arg2="${esc(m.email)}" title="Reset password" aria-label="Reset password for ${esc(loginName(m.email))}">${icon('key', 'sm')}</button>
         </div>`).join('')}
         <div class="folio-note">Username logins work immediately. Email users create their own account with the assigned email and confirm it before signing in.</div>
@@ -1435,14 +1436,16 @@
   function loginLink(username) { return `${location.origin}/?u=${encodeURIComponent(username)}`; }
   function credentialsText(c) {
     return [
-      `Hi${c.name ? ' ' + c.name : ''}, here are your Pixel Payment login details${c.reset ? ' (password reset)' : ''}.`,
+      c.renamed
+        ? `Hi, your Pixel Payment username has changed from ${c.renamed} to ${c.username}. Your password is the same.`
+        : `Hi${c.name ? ' ' + c.name : ''}, here are your Pixel Payment login details${c.reset ? ' (password reset)' : ''}.`,
       '',
       `Login link: ${loginLink(c.username)}`,
       `Username: ${c.username}`,
-      `Temporary password: ${c.password}`,
+      c.password ? `Temporary password: ${c.password}` : '',
       c.access ? `Access: ${c.access}` : '',
       '',
-      'Open the link, sign in, then change your password from the key icon next to your name.',
+      c.password ? 'Open the link, sign in, then change your password from the key icon next to your name.' : 'Open the link and sign in with your new username.',
       'Please don’t share these details with anyone.',
     ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
   }
@@ -1455,15 +1458,15 @@
     const text = credentialsText(c);
     ui.credText = text;
     ui.creds = { username: c.username, password: c.password, link: loginLink(c.username) };
-    modal(c.reset ? 'Password reset' : 'User created', 'Copy these login details and send them to the staff member.',
+    modal(c.renamed ? 'Username changed' : c.reset ? 'Password reset' : 'User created', 'Copy these login details and send them to the staff member.',
       `<div class="cred-card">
-        <div class="cred-head"><span class="mark">${pxMark}</span><div><strong>${esc(c.username)}</strong><small>${esc(c.access || '')}</small></div><span class="badge success">${c.reset ? 'New password' : 'Ready to sign in'}</span></div>
+        <div class="cred-head"><span class="mark">${pxMark}</span><div><strong>${esc(c.username)}</strong><small>${esc(c.access || '')}</small></div><span class="badge success">${c.renamed ? 'New username' : c.reset ? 'New password' : 'Ready to sign in'}</span></div>
         ${row('Username', c.username, 'username')}
-        ${row('Temporary password', c.password, 'password', true)}
+        ${c.password ? row('Temporary password', c.password, 'password', true) : ''}
         ${row('Login link', loginLink(c.username), 'link')}
       </div>
       <label class="field"><span>Message to send <span class="hint">· you can edit it before copying</span></span><textarea class="cred-msg" rows="11" id="credMsg">${esc(text)}</textarea></label>
-      <div class="alert warn">${icon('alert', 'sm')}<span>The password is shown only now. It isn’t saved anywhere you can view later. If it’s lost, use Reset password.</span></div>`,
+      ${c.password ? `<div class="alert warn">${icon('alert', 'sm')}<span>The password is shown only now. It isn’t saved anywhere you can view later. If it’s lost, use Reset password.</span></div>` : `<div class="alert info">${icon('info', 'sm')}<span>Was <b>${esc(c.renamed)}</b>. Their password didn’t change. Use Reset password if they need a new one.</span></div>`}`,
       `<a class="btn" id="credWa" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">${icon('whatsapp', 'sm')} WhatsApp</a>
        <a class="btn" id="credMail" href="mailto:?subject=${encodeURIComponent('Your Pixel Payment login')}&body=${encodeURIComponent(text)}">${icon('mail', 'sm')} Email</a>
        <span class="spacer"></span>
@@ -1736,6 +1739,18 @@
         footer('Add user'), 'members');
     }
 
+    if (kind === 'user-rename') {
+      const m = (data.members || []).find((x) => x.email === arg) || { email: arg };
+      const self = arg === data.email;
+      return modal('Change username', `${esc(loginName(arg))} · ${m.role === 'admin' ? 'Head office administrator' : 'Outlet staff · ' + esc(outletName(m.outlet_id))}`,
+        `<input type="hidden" name="email" value="${esc(arg)}">
+        <div class="form-grid">
+          <label class="field wide"><span>New username <span class="hint">· letters, numbers, dots, dashes</span></span><input name="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{2,31}" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(loginName(arg))}"></label>
+        </div>
+        <div class="alert info">${icon('info', 'sm')}<span>Their password, role, outlet and past invoices stay the same. ${self ? 'You’ll be signed out and sign in again with the new username.' : 'They’ll need to sign in again with the new username. You’ll get the new login details to send.'}</span></div>`,
+        footer('Change username'), 'staff-rename');
+    }
+
     if (kind === 'reset') {
       return modal('Reset password', `Set a new password for <b>${esc(loginName(arg))}</b>.`,
         `<input type="hidden" name="email" value="${esc(arg)}">${passwordField('New temporary password', 'wide', genPassword())}
@@ -1987,6 +2002,11 @@
         values.reference = `${values.reference} · paid ${pc} ${amt.toFixed(2)} at ${fxText(payRate)}`.slice(0, 100);
       }
     }
+    if (name === 'staff-rename') {
+      const u = String(values.username || '').trim().toLowerCase();
+      if (u === loginName(values.email)) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Enter a different username.</span></div>`; return; }
+      if (data.members.some((m) => m.email === u + '@' + usernameDomain)) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>That username is already in use.</span></div>`; return; }
+    }
     if (name === 'my-password') {
       if (values.password !== values.password2) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>The two passwords don’t match.</span></div>`; return; }
       if (!requireLive()) return;
@@ -2010,18 +2030,20 @@
     if (!requireLive()) return;
     btn.disabled = true;
     try {
-      await post(endpoint, values);
+      const result = await post(endpoint, values);
+      if (name === 'staff-rename' && result?.self) { closeOverlay(); toast('Username changed. Sign in again with your new username.'); setTimeout(signOut, 1200); return; }
       if (name !== 'settings') closeOverlay();
       if (name === 'stay-delete') ui.selectedStay = null;
       await load();
       if (name === 'stay-delete') render();
-      if (name === 'staff-create' || name === 'staff-reset') {
-        const username = name === 'staff-create' ? String(values.username).trim().toLowerCase() : loginName(values.email);
-        const m = name === 'staff-create' ? values : (data.members || []).find((x) => x.email === values.email) || {};
+      if (name === 'staff-create' || name === 'staff-reset' || name === 'staff-rename') {
+        const username = name === 'staff-reset' ? loginName(values.email) : String(values.username).trim().toLowerCase();
+        const lookup = name === 'staff-rename' ? username + '@' + usernameDomain : values.email;
+        const m = name === 'staff-create' ? values : (data.members || []).find((x) => x.email === lookup) || {};
         const access = m.role === 'admin' ? 'Head office administrator' : m.role === 'outlet' || m.outlet_id ? `Outlet staff · ${outletName(m.outlet_id)}` : '';
-        return showCredentials({ username, password: values.password, access, reset: name === 'staff-reset' });
+        return showCredentials({ username, password: name === 'staff-rename' ? '' : values.password, access, reset: name === 'staff-reset', renamed: name === 'staff-rename' ? loginName(values.email) : '' });
       }
-      toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'bill-update': 'Invoice updated.', 'bill-delete': 'Invoice deleted.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.', 'payment-update': 'Payment updated.', 'payment-void': 'Payment voided. The invoices are open again.', 'stay-delete': 'Folio deleted.' }[endpoint] || 'Saved to your workspace.');
+      toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'staff-rename': 'Username changed.', 'bill-update': 'Invoice updated.', 'bill-delete': 'Invoice deleted.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.', 'payment-update': 'Payment updated.', 'payment-void': 'Payment voided. The invoices are open again.', 'stay-delete': 'Folio deleted.' }[endpoint] || 'Saved to your workspace.');
     } catch (err) {
       errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
       btn.disabled = false;
