@@ -57,6 +57,10 @@
     tag: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
     arrowUpRight: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
     arrowDownRight: '<path d="m7 7 10 10"/><path d="M17 7v10H7"/>',
+    user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
+    eyeOff: '<path d="M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-1.7 2.7"/><path d="M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="m2 2 20 20"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
     hash: '<path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="M16 3l-2 18"/>',
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -216,6 +220,11 @@
     }
   }
 
+  function greeting() {
+    const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: 'numeric', hour12: false }).format(new Date()));
+    return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  }
+
   function renderAuth(notice = '', tone = 'warn') {
     document.body.classList.remove('signed-in');
     const signup = ui.authMode === 'signup';
@@ -259,26 +268,38 @@
           <div class="auth-foot">© ${new Date().getFullYear()} Pixel Payment · Centralised guest billing</div>
         </aside>
         <main class="auth-main">
-          <div class="auth-card">
-            <div class="mobile-brand"><span class="mark">${icon('logo')}</span><div class="wordmark">Pixel Payment<small>Cozy Hospitality</small></div></div>
-            <h2>${signup ? 'Create your account' : 'Welcome back'}</h2>
-            <p class="sub">${signup ? 'Use the email address your administrator assigned to you.' : 'Sign in to post outlet charges or settle a guest bill.'}</p>
-            <div class="auth-tabs" role="tablist">
-              <button type="button" role="tab" aria-selected="${!signup}" data-act="auth-mode" data-arg="signin">Sign in</button>
-              <button type="button" role="tab" aria-selected="${signup}" data-act="auth-mode" data-arg="signup">Create account</button>
+          <div class="auth-stage">
+            <div class="auth-card">
+              <div class="mobile-brand"><span class="mark">${icon('logo')}</span><div class="wordmark">Pixel Payment<small>Cozy Hospitality</small></div></div>
+              <div class="auth-eyebrow"><span class="pulse-dot" aria-hidden="true"></span>${signup ? 'New staff account' : 'Staff sign-in'}</div>
+              <h2>${signup ? 'Create your account' : greeting()}</h2>
+              <p class="sub">${signup ? 'Use the email address your administrator assigned to you.' : 'Sign in to post outlet charges or settle a guest bill.'}</p>
+              <div class="auth-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected="${!signup}" data-act="auth-mode" data-arg="signin">Sign in</button>
+                <button type="button" role="tab" aria-selected="${signup}" data-act="auth-mode" data-arg="signup">Create account</button>
+              </div>
+              ${notice ? `<div class="alert ${tone}" style="margin-bottom:16px">${icon(tone === 'success' ? 'checkCircle' : 'info', 'sm')}<span>${esc(notice)}</span></div>` : ''}
+              <form id="authForm" novalidate>
+                <label class="field"><span>${signup ? 'Work email' : 'Username or email'}</span>
+                  <div class="input-icon">${icon(signup ? 'mail' : 'user', 'sm')}${signup
+                    ? '<input name="email" type="email" autocomplete="username" placeholder="name@company.com" required>'
+                    : '<input name="email" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="e.g. deck.cashier or name@company.com" required>'}</div>
+                </label>
+                <label class="field"><span>Password ${signup ? '<span class="hint">· at least 12 characters</span>' : ''}</span>
+                  <div class="input-icon">${icon('lock', 'sm')}<input name="password" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" ${signup ? 'minlength="12"' : ''} required>
+                    <button type="button" class="pw-eye" data-act="pw-toggle" aria-label="Show password" aria-pressed="false" title="Show password">${icon('eye', 'sm')}</button></div>
+                  <small class="caps-warn" hidden>${icon('alert', 'sm')} Caps Lock is on</small>
+                </label>
+                <div id="authError" class="form-error" role="alert"></div>
+                <button type="submit" class="btn primary lg block auth-submit"><span>${signup ? 'Create account' : 'Sign in'}</span>${icon('arrowRight', 'sm')}</button>
+              </form>
+              <div class="divider">or</div>
+              <button class="btn block demo-btn" data-act="demo">${icon('eye', 'sm')} Explore the interactive demo <span class="demo-tag">No sign-in</span></button>
+              <div class="auth-secure">${icon('shield', 'sm')} Encrypted sign-in · each outlet sees only its own bills</div>
             </div>
-            ${notice ? `<div class="alert ${tone}" style="margin-bottom:16px">${icon(tone === 'success' ? 'checkCircle' : 'info', 'sm')}<span>${esc(notice)}</span></div>` : ''}
-            <form id="authForm" novalidate>
-              ${signup
-                ? '<label class="field"><span>Work email</span><input name="email" type="email" autocomplete="username" placeholder="name@company.com" required></label>'
-                : '<label class="field"><span>Username or email</span><input name="email" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="e.g. deck.cashier or name@company.com" required></label>'}
-              <label class="field"><span>Password ${signup ? '<span class="hint">· at least 12 characters</span>' : ''}</span><input name="password" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" ${signup ? 'minlength="12"' : ''} required></label>
-              <div id="authError" class="form-error" role="alert"></div>
-              <button type="submit" class="btn primary lg block">${signup ? 'Create account' : 'Sign in'}</button>
-              <p class="auth-help">${signup ? 'After confirming your email, an administrator must assign you a role before you can access the workspace.' : 'Use the username or email your head office administrator set up for you.'}</p>
-            </form>
-            <div class="divider">or</div>
-            <button class="btn block" data-act="demo">${icon('eye', 'sm')} Explore the interactive demo</button>
+            <p class="auth-note">${signup
+              ? 'After confirming your email, an administrator must assign you a role before you can use the workspace.'
+              : 'Forgot your password or username? Ask your head office administrator to reset it.'}</p>
           </div>
         </main>
       </div>`;
@@ -295,6 +316,7 @@
         if (signup && values.password.length < 12) throw new Error('Use at least 12 characters for a new password.');
         if (!sb) throw new Error('Database setup is not complete yet.');
         btn.disabled = true;
+        btn.classList.add('is-loading');
         if (!signup) values.email = toLoginEmail(values.email);
         const { data: res, error } = signup
           ? await sb.auth.signUp({ email: values.email, password: values.password, options: { emailRedirectTo: location.origin } })
@@ -311,8 +333,14 @@
         errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
       } finally {
         btn.disabled = false;
+        btn.classList.remove('is-loading');
       }
     };
+    const pw = form.querySelector('[name=password]'), caps = form.querySelector('.caps-warn');
+    const capsCheck = (e) => { if (e.getModifierState) caps.hidden = !e.getModifierState('CapsLock'); };
+    pw.addEventListener('keydown', capsCheck);
+    pw.addEventListener('keyup', capsCheck);
+    pw.addEventListener('blur', () => { caps.hidden = true; });
     form.querySelector('input').focus();
     startLiquid();
   }
@@ -2109,6 +2137,16 @@
 
   const ACTIONS = {
     'auth-mode': (m) => { ui.authMode = m; renderAuth(); },
+    'pw-toggle': (_, el) => {
+      const input = el.parentElement.querySelector('input');
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      el.setAttribute('aria-pressed', String(show));
+      el.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      el.title = show ? 'Hide password' : 'Show password';
+      el.innerHTML = icon(show ? 'eyeOff' : 'eye', 'sm');
+      input.focus();
+    },
     nav: navigate,
     menu: () => {
       const sb = document.getElementById('sidebar');
