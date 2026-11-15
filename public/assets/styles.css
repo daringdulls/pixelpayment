@@ -1357,3 +1357,16 @@ td .primary-text, .list-row strong { font-weight: 600; }
 .auth-stage, .auth-stage > * { min-width: 0; }
 .demo-btn { white-space: normal; height: auto; min-height: 46px; padding: 8px 14px; }
 @media (max-width: 420px) { .demo-tag { display: none; } .auth-main { padding: 24px 14px; } }
+
+/* Invoice edit / delete (head office) */
+.row-actions { display: inline-flex; gap: 2px; opacity: .55; transition: opacity .15s ease; }
+tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
+.btn.danger { color: #B5402A; }
+.btn.danger:hover:not(:disabled) { background: #FCEDE9; color: #9C2F1B; }
+.btn.danger-solid { background: #C2412B; border-color: #C2412B; color: #fff; }
+.btn.danger-solid:hover:not(:disabled) { background: #A53521; border-color: #A53521; }
+.delete-card { border: 1px solid #F3D3CB; background: #FDF6F4; border-radius: 12px; padding: 14px 16px; display: grid; gap: 4px; }
+.delete-card div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.delete-card div strong { font-family: var(--display); font-size: 18px; }
+.delete-card p { font-size: 13px; color: var(--muted); }
+@media (hover: none) { .row-actions { opacity: 1; } }

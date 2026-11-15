@@ -61,6 +61,8 @@
     lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
     mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
     eyeOff: '<path d="M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-1.7 2.7"/><path d="M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="m2 2 20 20"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+    pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/>',
     hash: '<path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="M16 3l-2 18"/>',
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -982,7 +984,10 @@
         <td class="r amount">${money(b.amount)}</td>
         <td class="r muted-amount">${money(outstanding(b))}</td>
         <td>${statusBadge(b)}</td>
-        <td class="r"><span class="row-arrow">${icon('chevronRight', 'sm')}</span></td>
+        <td class="r">${isAdmin() ? `<span class="row-actions">
+          <button class="btn ghost icon sm" data-act="form" data-arg="bill-edit" data-arg2="${esc(b.id)}" title="Edit invoice" aria-label="Edit ${esc(b.number)}">${icon('pencil', 'sm')}</button>
+          <button class="btn ghost icon sm danger" data-act="form" data-arg="bill-delete" data-arg2="${esc(b.id)}" title="Delete invoice" aria-label="Delete ${esc(b.number)}">${icon('trash', 'sm')}</button>
+        </span>` : `<span class="row-arrow">${icon('chevronRight', 'sm')}</span>`}</td>
       </tr>`).join('');
   }
 
@@ -1550,6 +1555,45 @@
         </div>`, footer(isAdmin() ? 'Post invoice' : 'Post bill'), 'bills');
     }
 
+    if (kind === 'bill-edit' || kind === 'bill-delete') {
+      if (!isAdmin()) return toast('Only head office can change invoices.');
+      const b = data.bills.find((x) => x.id === arg);
+      if (!b) return toast('That invoice no longer exists.');
+      const paid = paidFor(b.id);
+      const stayChoices = stays().filter((s) => s.status === 'active' || s.id === b.stay_id)
+        .map((s) => `<option value="${esc(s.id)}" ${s.id === b.stay_id ? 'selected' : ''}>${esc(s.guest_name)} · Room ${esc(s.room)} · ${esc(s.property)}${s.status === 'active' ? '' : ' (checked out)'}</option>`).join('');
+      if (kind === 'bill-delete') {
+        if (paid > 0) {
+          return modal('Can’t delete this invoice', `${esc(b.number)} · ${esc(outletName(b.outlet_id))}`,
+            `<div class="alert warn">${icon('alert', 'sm')}<span>${esc(currency())} ${money(paid)} has already been collected on this invoice, so deleting it would unbalance the guest’s folio. Edit the amount or description instead.</span></div>`,
+            `<button type="button" class="btn" data-act="close">Close</button><button type="button" class="btn primary" data-act="form" data-arg="bill-edit" data-arg2="${esc(b.id)}">${icon('pencil', 'sm')} Edit invoice</button>`);
+        }
+        return modal('Delete invoice?', 'This permanently removes the charge from the guest’s folio.',
+          `<input type="hidden" name="id" value="${esc(b.id)}">
+          <div class="delete-card">
+            <div><span class="mono">${esc(b.number)}</span><strong>${esc(currency())} ${money(b.amount)}</strong></div>
+            <p>${esc(b.customer)} · ${esc(stayMeta(b))}</p>
+            <p>${esc(outletName(b.outlet_id))} · ${fmtDate(b.date)} · ${esc(billSummary(b) || '')}</p>
+          </div>
+          <p class="kpi-foot">This can’t be undone. The deletion is recorded in the activity log.</p>`,
+          `<button type="button" class="btn" data-act="close">Keep invoice</button><button type="submit" class="btn danger-solid">${icon('trash', 'sm')} Delete invoice</button>`, 'bill-delete');
+      }
+      return modal(`Edit invoice ${esc(b.number)}`, `${esc(outletName(b.outlet_id))} · posted by ${esc(loginName(b.created_by))}`,
+        `<input type="hidden" name="id" value="${esc(b.id)}">
+        <div class="form-grid">
+          ${field('Invoice number', 'number', 'text', b.number, 'maxlength="60" autocomplete="off"')}
+          <label class="field"><span>Guest and room</span><select name="stay_id" required>${stayChoices}</select></label>
+          ${field('Invoice date', 'date', 'date', b.date)}
+          ${field('Due date', 'due', 'date', b.due)}
+          ${moneyField('Amount', (b.amount / 100).toFixed(2), `min="${Math.max(0.01, paid / 100)}" max="100000000"`, 'wide amount-field')}
+          ${paid ? `<p class="hint-line wide">${esc(currency())} ${money(paid)} already collected, so the amount can’t go below that.</p>` : ''}
+          <label class="field wide"><span>Description <span class="hint">· item lines look like “2 × Fun Dive 1 @ USD 81.00”</span></span>
+            <textarea name="notes" rows="5" maxlength="2000" required class="mono-area">${esc(b.notes || '')}</textarea></label>
+        </div>
+        <div class="alert info">${icon('info', 'sm')}<span>Changes apply straight away and are recorded in the activity log. The outlet stays ${esc(outletName(b.outlet_id))}.</span></div>`,
+        footer('Save changes'), 'bill-update');
+    }
+
     if (kind === 'user') {
       const mode = arg || 'login';
       const tabs = `<div class="auth-tabs" role="tablist" style="margin:0">
@@ -1830,7 +1874,7 @@
       await post(name, values);
       if (name !== 'settings') closeOverlay();
       await load();
-      toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.' }[name] || 'Saved to your workspace.');
+      toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'bill-update': 'Invoice updated.', 'bill-delete': 'Invoice deleted.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.' }[name] || 'Saved to your workspace.');
     } catch (err) {
       errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
       btn.disabled = false;
@@ -1861,6 +1905,8 @@
         <div class="doc-bar-title">${icon('invoices', 'sm')}<span class="mono">${esc(b.number)}</span>${statusBadge(b)}</div>
         <div class="doc-bar-actions">
           ${b.stay_id ? `<button class="btn sm ghost" data-act="guest-from" data-arg="${esc(b.stay_id)}">${icon('bed', 'sm')} Guest folio</button>` : ''}
+          ${isAdmin() ? `<button class="btn sm" data-act="form" data-arg="bill-edit" data-arg2="${esc(b.id)}">${icon('pencil', 'sm')} Edit</button>
+          <button class="btn sm ghost danger" data-act="form" data-arg="bill-delete" data-arg2="${esc(b.id)}" title="Delete invoice" aria-label="Delete invoice">${icon('trash', 'sm')}</button>` : ''}
           <button class="btn sm" data-act="print-doc">${icon('printer', 'sm')} Print / PDF</button>
           ${primary}
           <button class="btn ghost icon sm" data-act="close" aria-label="Close">${icon('x', 'sm')}</button>
