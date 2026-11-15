@@ -35,6 +35,9 @@ Head office can add users in **Settings → Staff & logins → Add user**:
 
 The key icon on each user resets their password. The server only allows this for administrators and only for members of this workspace.
 
+
+After **Add user** or **Reset password**, a *Login details* card shows the username, the temporary password and a login link (`/?u=<username>`, which fills in the username on the sign-in page). Each one has its own Copy button. **Copy all details** copies a ready-to-send message, and the **WhatsApp** and **Email** buttons open it in those apps. The password is generated for you and shown only once. Staff change their own password from the key icon next to their name in the sidebar.
+
 ## Rate cards & itemised bills
 Each outlet can keep a price list (**Rate card** in the menu). When an outlet has one, **New bill** becomes an item picker:
 choose items from the dropdown, set quantities, add a discount % or a custom item, and the total is calculated.

@@ -63,6 +63,7 @@
     eyeOff: '<path d="M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-1.7 2.7"/><path d="M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="m2 2 20 20"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
     pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
     trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/>',
+    whatsapp: '<path d="M3 21l1.65-3.8A9 9 0 1 1 7.8 20.4Z"/><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1"/>',
     hash: '<path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="M16 3l-2 18"/>',
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -345,7 +346,11 @@
     pw.addEventListener('keydown', capsCheck);
     pw.addEventListener('keyup', capsCheck);
     pw.addEventListener('blur', () => { caps.hidden = true; });
-    form.querySelector('input').focus();
+    const pre = new URLSearchParams(location.search).get('u');
+    if (pre && !signup) {
+      form.querySelector('[name=email]').value = pre.slice(0, 80);
+      form.querySelector('[name=password]').focus();
+    } else form.querySelector('input').focus();
     startLiquid();
   }
 
@@ -557,6 +562,7 @@
             <div class="user-chip">
               <span class="avatar">${esc(initials(loginName(data.email)))}</span>
               <div class="meta"><strong>${who}</strong><small title="${esc(data.email)}">${esc(loginName(data.email))}</small></div>
+              <button class="btn ghost icon sm" data-act="form" data-arg="my-password" title="Change password" aria-label="Change password">${icon('key', 'sm')}</button>
               <button class="btn ghost icon sm" data-act="signout" title="Sign out" aria-label="Sign out">${icon('logout', 'sm')}</button>
             </div>
           </div>
@@ -1425,6 +1431,55 @@
     openOverlay(inner, title);
   }
 
+  // Login details card shown after creating a user or resetting a password. Nothing here is stored.
+  function loginLink(username) { return `${location.origin}/?u=${encodeURIComponent(username)}`; }
+  function credentialsText(c) {
+    return [
+      `Hi${c.name ? ' ' + c.name : ''}, here are your Pixel Payment login details${c.reset ? ' (password reset)' : ''}.`,
+      '',
+      `Login link: ${loginLink(c.username)}`,
+      `Username: ${c.username}`,
+      `Temporary password: ${c.password}`,
+      c.access ? `Access: ${c.access}` : '',
+      '',
+      'Open the link, sign in, then change your password from the key icon next to your name.',
+      'Please don’t share these details with anyone.',
+    ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
+  }
+  function showCredentials(c) {
+    const row = (label, value, key, secret = false) => `<div class="cred-row">
+        <div class="cred-label">${label}</div>
+        <div class="cred-value${secret ? ' secret' : ''}" data-cred="${key}">${esc(value)}</div>
+        <button type="button" class="btn sm" data-act="copy-cred" data-arg="${key}">${icon('copy', 'sm')} Copy</button>
+      </div>`;
+    const text = credentialsText(c);
+    ui.credText = text;
+    ui.creds = { username: c.username, password: c.password, link: loginLink(c.username) };
+    modal(c.reset ? 'Password reset' : 'User created', 'Copy these login details and send them to the staff member.',
+      `<div class="cred-card">
+        <div class="cred-head"><span class="mark">${pxMark}</span><div><strong>${esc(c.username)}</strong><small>${esc(c.access || '')}</small></div><span class="badge success">${c.reset ? 'New password' : 'Ready to sign in'}</span></div>
+        ${row('Username', c.username, 'username')}
+        ${row('Temporary password', c.password, 'password', true)}
+        ${row('Login link', loginLink(c.username), 'link')}
+      </div>
+      <label class="field"><span>Message to send <span class="hint">· you can edit it before copying</span></span><textarea class="cred-msg" rows="11" id="credMsg">${esc(text)}</textarea></label>
+      <div class="alert warn">${icon('alert', 'sm')}<span>The password is shown only now. It isn’t saved anywhere you can view later. If it’s lost, use Reset password.</span></div>`,
+      `<a class="btn" id="credWa" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener">${icon('whatsapp', 'sm')} WhatsApp</a>
+       <a class="btn" id="credMail" href="mailto:?subject=${encodeURIComponent('Your Pixel Payment login')}&body=${encodeURIComponent(text)}">${icon('mail', 'sm')} Email</a>
+       <span class="spacer"></span>
+       <button type="button" class="btn primary" data-act="copy-cred" data-arg="all">${icon('copy', 'sm')} Copy all details</button>`);
+  }
+  async function copyText(text, done) {
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      const t = Object.assign(document.createElement('textarea'), { value: text });
+      t.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); } finally { t.remove(); }
+    }
+    toast(done);
+  }
+
   function toast(msg) {
     const host = document.getElementById('toast');
     const el = document.createElement('div');
@@ -1443,8 +1498,8 @@
     `<label class="field ${cls}"><span>${label}</span><input name="${name}" type="${type}" value="${esc(value)}" ${attrs} required></label>`;
   const moneyField = (label, value = '', attrs = '', cls = '') =>
     `<label class="field ${cls}"><span>${label}</span><div class="input-affix"><span class="affix" data-affix>${esc(currency())}</span><input name="amount" type="number" inputmode="decimal" value="${esc(value)}" min="0.01" step="0.01" ${attrs} required></div></label>`;
-  const passwordField = (label, cls = 'wide') => `<label class="field ${cls}"><span>${label} <span class="hint">· 12+ characters</span></span>
-    <div class="pw-row"><input name="password" type="text" minlength="12" maxlength="72" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Type or generate">
+  const passwordField = (label, cls = 'wide', value = '') => `<label class="field ${cls}"><span>${label} <span class="hint">· 12+ characters</span></span>
+    <div class="pw-row"><input name="password" type="text" minlength="12" maxlength="72" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Type or generate" value="${esc(value)}">
     <button type="button" class="btn" data-act="gen-pass">${icon('refresh', 'sm')} Generate</button>
     <button type="button" class="btn icon" data-act="copy-pass" title="Copy password" aria-label="Copy password">${icon('copy', 'sm')}</button></div></label>`;
   // Next invoice number for an outlet: outlet initials + running sequence, e.g. Cozy Deck -> CD-048.
@@ -1563,6 +1618,16 @@
         </div>`, footer(isAdmin() ? 'Post invoice' : 'Post bill'), 'bills');
     }
 
+    if (kind === 'my-password') {
+      return modal('Change your password', `Signed in as <b>${esc(loginName(data.email))}</b>`,
+        `<div class="form-grid">
+          <label class="field wide"><span>New password <span class="hint">· 12+ characters</span></span><input name="password" type="password" minlength="12" maxlength="72" required autocomplete="new-password"></label>
+          <label class="field wide"><span>Repeat new password</span><input name="password2" type="password" minlength="12" maxlength="72" required autocomplete="new-password"></label>
+        </div>
+        <p class="kpi-foot">Use something only you know. Head office can reset it if you forget.</p>`,
+        footer('Change password'), 'my-password');
+    }
+
     if (kind === 'receipt') {
       if (!isAdmin()) return toast('Only head office can change payments.');
       const r = receiptsList().find((x) => x.key === arg);
@@ -1659,10 +1724,10 @@
         return modal('Add user', 'Create a login and hand the username and password to the staff member.',
           `${tabs}<div class="form-grid">
             <label class="field wide"><span>Username <span class="hint">· letters, numbers, dots, dashes</span></span><input name="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9._\\-]{2,31}" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e.g. deck.cashier"></label>
-            ${passwordField('Password')}
+            ${passwordField('Temporary password', 'wide', genPassword())}
             ${roleFields}
           </div>
-          <div class="alert info">${icon('info', 'sm')}<span>They sign in with this username and password straight away. No email address needed.</span></div>`,
+          <div class="alert info">${icon('info', 'sm')}<span>After you create the user you’ll get their login details with copy buttons, ready to send. They can change the password after signing in.</span></div>`,
           footer('Create user'), 'staff-create');
       }
       return modal('Add user', 'The staff member sets their own password.',
@@ -1673,8 +1738,8 @@
 
     if (kind === 'reset') {
       return modal('Reset password', `Set a new password for <b>${esc(loginName(arg))}</b>.`,
-        `<input type="hidden" name="email" value="${esc(arg)}">${passwordField('New password')}
-        <p class="kpi-foot">Share the new password with them directly. Their old password stops working immediately.</p>`,
+        `<input type="hidden" name="email" value="${esc(arg)}">${passwordField('New temporary password', 'wide', genPassword())}
+        <p class="kpi-foot">Their old password stops working immediately. You’ll get the login details to copy and send next.</p>`,
         footer('Set password'), 'staff-reset');
     }
 
@@ -1922,6 +1987,15 @@
         values.reference = `${values.reference} · paid ${pc} ${amt.toFixed(2)} at ${fxText(payRate)}`.slice(0, 100);
       }
     }
+    if (name === 'my-password') {
+      if (values.password !== values.password2) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>The two passwords don’t match.</span></div>`; return; }
+      if (!requireLive()) return;
+      btn.disabled = true;
+      const { error } = await sb.auth.updateUser({ password: values.password });
+      if (error) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(error.message)}</span></div>`; btn.disabled = false; return; }
+      closeOverlay();
+      return toast('Password changed. Use it next time you sign in.');
+    }
     let endpoint = name;
     if (name === 'payment-update') {
       if (values.status === 'void') {
@@ -1941,6 +2015,12 @@
       if (name === 'stay-delete') ui.selectedStay = null;
       await load();
       if (name === 'stay-delete') render();
+      if (name === 'staff-create' || name === 'staff-reset') {
+        const username = name === 'staff-create' ? String(values.username).trim().toLowerCase() : loginName(values.email);
+        const m = name === 'staff-create' ? values : (data.members || []).find((x) => x.email === values.email) || {};
+        const access = m.role === 'admin' ? 'Head office administrator' : m.role === 'outlet' || m.outlet_id ? `Outlet staff · ${outletName(m.outlet_id)}` : '';
+        return showCredentials({ username, password: values.password, access, reset: name === 'staff-reset' });
+      }
       toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'bill-update': 'Invoice updated.', 'bill-delete': 'Invoice deleted.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.', 'payment-update': 'Payment updated.', 'payment-void': 'Payment voided. The invoices are open again.', 'stay-delete': 'Folio deleted.' }[endpoint] || 'Saved to your workspace.');
     } catch (err) {
       errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
@@ -2289,6 +2369,10 @@
     settle: (id) => openForm('settle', id),
     checkout: (id) => guestAction('checkout', id),
     'stay-reopen': (id) => guestAction('stay-reopen', id),
+    'copy-cred': (key) => {
+      if (key === 'all') return copyText(document.getElementById('credMsg')?.value || ui.credText, 'Login details copied. Paste them into a message to the staff member.');
+      copyText(ui.creds[key], { username: 'Username copied.', password: 'Password copied.', link: 'Login link copied.' }[key]);
+    },
     'approve-stay': (id) => guestAction('approve-stay', id),
     status: (s) => { ui.statusFilter = s; render(); },
     'clear-filters': () => { ui.search = ''; ui.statusFilter = ''; ui.outletFilter = ''; render(); },
@@ -2355,6 +2439,11 @@
   });
 
   document.addEventListener('input', (e) => {
+    if (e.target.id === 'credMsg') {
+      const t = e.target.value;
+      document.getElementById('credWa').href = 'https://wa.me/?text=' + encodeURIComponent(t);
+      document.getElementById('credMail').href = 'mailto:?subject=' + encodeURIComponent('Your Pixel Payment login') + '&body=' + encodeURIComponent(t);
+    }
     if (e.target.form && e.target.form.querySelector('#billSummary')) { const bf = e.target.form; setTimeout(() => updateBillSummary(bf), 0); }
     if (e.target.name === 'amount' && e.target.form?.querySelector('[data-fx-hint]')) updateFxHint(e.target.form);
     const rf = e.target.dataset.rateField;
