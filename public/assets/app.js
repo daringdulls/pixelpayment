@@ -67,6 +67,8 @@
   };
   const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 
+  // PixelateMV symbol, small cut (for marks at 32 px and below). Exact artwork from the brand kit.
+  const pxMark = '<svg class="px" viewBox="0 0 192 192" aria-hidden="true"><path fill="#FFFFFF" fill-rule="evenodd" d="M0 0H120A72 72 0 0 1 192 72V107H157A85 85 0 0 0 72 192A72 72 0 0 1 0 120ZM72 21.5H132V81.5H72Z"/><path fill="#1FC7B6" d="M157 133H192V192H98A59 59 0 0 1 157 133Z"/></svg>';
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const shiftDate = (iso, days) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
@@ -233,7 +235,7 @@
     root().innerHTML = `
       <div class="auth">
         <aside class="auth-aside">
-          <div class="brand-row"><span class="mark">${icon('logo')}</span><div class="wordmark">Pixel Payment<small>Cozy Hospitality</small></div></div>
+          <div class="brand-row"><span class="mark">${pxMark}</span><div class="wordmark">Pixel Payment<small>Cozy Hospitality</small></div></div>
           <div class="liquid-wrap" aria-hidden="true">
             <svg class="liquid" viewBox="0 0 400 260">
               <defs>
@@ -272,7 +274,7 @@
         <main class="auth-main">
           <div class="auth-stage">
             <div class="auth-card">
-              <div class="mobile-brand"><span class="mark">${icon('logo')}</span><div class="wordmark">Pixel Payment<small>Cozy Hospitality</small></div></div>
+              <div class="mobile-brand"><span class="mark">${pxMark}</span><div class="wordmark">Pixel Payment<small>Cozy Hospitality</small></div></div>
               <div class="auth-eyebrow"><span class="pulse-dot" aria-hidden="true"></span>${signup ? 'New staff account' : 'Staff sign-in'}</div>
               <h2>${signup ? 'Create your account' : greeting()}</h2>
               <p class="sub">${signup ? 'Use the email address your administrator assigned to you.' : 'Sign in to post outlet charges or settle a guest bill.'}</p>
@@ -479,7 +481,7 @@
       root().innerHTML = `
         <div class="auth-main" style="min-height:100vh">
           <div class="auth-card" style="text-align:center">
-            <span class="mark" style="margin:0 auto 20px;width:44px;height:44px">${icon('logo')}</span>
+            <span class="mark" style="margin:0 auto 20px;width:44px;height:44px">${pxMark}</span>
             <h2>Workspace unavailable</h2>
             <p class="sub">${esc(err.message || 'Something went wrong while loading your workspace.')}</p>
             <div style="display:flex;gap:10px;justify-content:center">
@@ -548,7 +550,7 @@
     root().innerHTML = `
       <div class="app">
         <aside class="sidebar" id="sidebar">
-          <div class="brand-row"><span class="mark">${icon('logo')}</span><div class="wordmark">Pixel Payment<small>Guest billing</small></div></div>
+          <div class="brand-row"><span class="mark">${pxMark}</span><div class="wordmark">Pixel Payment<small>Guest billing</small></div></div>
           <div class="org-switch"><span class="org-avatar">${esc(initials(data.settings.company))}</span><div style="min-width:0"><strong>${esc(data.settings.company)}</strong><small>${who} · ${esc(currency())}</small></div></div>
           <nav aria-label="Main" class="nav-main"><span class="nav-indicator" aria-hidden="true"></span>${nav}</nav>
           <div class="sidebar-foot">
@@ -731,7 +733,7 @@
     const receipts = new Map();
     for (const p of data.payments.filter((p) => bills.some((b) => b.id === p.bill_id))) {
       const key = p.settlement_id || p.id;
-      if (!receipts.has(key)) receipts.set(key, { ...p, amount: 0 });
+      if (!receipts.has(key)) receipts.set(key, { ...p, key, amount: 0 });
       receipts.get(key).amount += p.amount;
     }
     const byOutlet = data.outlets.filter((o) => bills.some((b) => b.outlet_id === o.id));
@@ -744,17 +746,22 @@
         : `<button class="btn primary" data-act="checkout" data-arg="${esc(id)}">${icon('logout', 'sm')} Complete checkout</button>`;
     }
 
+    const adminTools = isAdmin() ? `${s.status === 'active' ? '' : `<button class="btn" data-act="stay-reopen" data-arg="${esc(id)}">${icon('refresh', 'sm')} Reopen folio</button>`}
+          <button class="btn ghost icon danger" data-act="form" data-arg="stay-delete" data-arg2="${esc(id)}" title="Delete folio" aria-label="Delete folio">${icon('trash', 'sm')}</button>` : '';
+
     return `
       <div class="back-row">
         <button class="btn ghost sm" data-act="back-guests">${icon('chevronLeft', 'sm')} All guests</button>
         <div class="page-actions">
           <button class="btn" data-act="refresh">${icon('refresh', 'sm')} Refresh</button>
           <button class="btn" data-act="print">${icon('printer', 'sm')} Print / PDF</button>
+          ${adminTools}
           ${primary}
         </div>
       </div>
       <div id="guestActionError" class="form-error" style="margin-bottom:12px"></div>
       ${!isAdmin() ? banner('', 'info', 'Outlet view', 'Only your outlet’s charges and collections are shown on this folio.') : ''}
+      ${isAdmin() && s.status !== 'active' ? banner('', 'info', 'Folio closed', 'This guest has checked out. Reopen the folio to post more charges, collect again or make corrections.') : ''}
       ${pending ? banner('warn', 'clock', `${pending} charge${pending > 1 ? 's' : ''} awaiting review`, 'Pending charges are included in the total. Approve them before collecting a consolidated payment.', isAdmin() ? `<button class="btn sm" data-act="approve-stay" data-arg="${esc(id)}">${icon('check', 'sm')} Approve all</button>` : '') : ''}
       ${folioStatement(s, bills, receipts, byOutlet, { total, paid, balance, pending, settled })}`;
   }
@@ -762,7 +769,7 @@
   function folioStatement(s, bills, receipts, byOutlet, { total, paid, balance, pending, settled }) {
     const tx = [
       ...bills.map((b) => ({ date: b.date, ref: b.number, desc: billSummary(b) || 'Outlet charges', outlet: outletName(b.outlet_id), charge: b.amount, credit: 0, id: b.id, pending: b.status === 'pending' })),
-      ...[...receipts.values()].map((r) => ({ date: r.date, ref: r.reference, desc: 'Payment received · ' + r.method, outlet: 'Front office', charge: 0, credit: r.amount })),
+      ...[...receipts.values()].map((r) => ({ date: r.date, ref: r.reference, desc: 'Payment received · ' + r.method, outlet: 'Front office', charge: 0, credit: r.amount, rid: r.key })),
     ].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (b.charge - a.charge));
     let run = 0;
     tx.forEach((t) => { run += t.charge - t.credit; t.balance = run; });
@@ -801,7 +808,7 @@
         ${!isAdmin() ? `<p class="st-scope">${icon('info', 'sm')} Shows ${esc(myOutletName())} charges and collections only.</p>` : ''}
         <div class="st-table"><table class="st-lines">
           <thead><tr><th>Date</th><th>Reference</th><th>Description</th><th>Outlet</th><th class="r">Charges</th><th class="r">Payments</th><th class="r">Balance</th></tr></thead>
-          <tbody>${tx.length ? tx.map((t) => `<tr class="${t.credit ? 'st-pay' : 'clickable'}" ${t.id ? `tabindex="0" data-act="invoice" data-arg="${esc(t.id)}"` : ''}>
+          <tbody>${tx.length ? tx.map((t) => `<tr class="${t.credit ? 'st-pay' : 'clickable'}${t.rid && isAdmin() ? ' clickable' : ''}" ${t.id ? `tabindex="0" data-act="invoice" data-arg="${esc(t.id)}"` : t.rid && isAdmin() ? `tabindex="0" data-act="form" data-arg="receipt" data-arg2="${esc(t.rid)}" title="Edit or void this payment"` : ''}>
             <td>${fmtDate(t.date)}</td><td class="mono">${esc(t.ref)}</td>
             <td class="wrap">${esc(t.desc)}${t.pending ? ' <span class="st-flag">Pending review</span>' : ''}</td><td>${esc(t.outlet)}</td>
             <td class="r">${t.charge ? money(t.charge) : ''}</td><td class="r">${t.credit ? money(t.credit) : ''}</td><td class="r">${money(t.balance)}</td>
@@ -1028,7 +1035,7 @@
     const map = new Map();
     for (const p of data.payments) {
       const key = p.settlement_id || p.id;
-      if (!map.has(key)) map.set(key, { ...p, amount: 0, bills: [] });
+      if (!map.has(key)) map.set(key, { ...p, key, amount: 0, bills: [] });
       const r = map.get(key);
       r.amount += p.amount;
       const bill = data.bills.find((b) => b.id === p.bill_id);
@@ -1052,7 +1059,7 @@
       <section class="card">
         <div class="card-head"><div><h2>Payment receipts</h2><p>One receipt per guest payment. Invoice allocations are included in the CSV export.</p></div>${isAdmin() ? `<button class="link" data-act="nav" data-arg="Guests">Collect from a guest ${icon('arrowRight', 'sm')}</button>` : ''}</div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Reference</th><th>Guest</th><th>Covers</th><th>Date</th><th>Method</th><th class="r">Amount (${esc(currency())})</th></tr></thead>
+          <thead><tr><th>Reference</th><th>Guest</th><th>Covers</th><th>Date</th><th>Method</th><th class="r">Amount (${esc(currency())})</th>${isAdmin() ? '<th class="r"><span class="sr-only">Actions</span></th>' : ''}</tr></thead>
           <tbody>${receipts.length ? receipts.map((r) => {
             const first = r.bills[0];
             const target = first ? (first.stay_id ? `data-act="guest-from" data-arg="${esc(first.stay_id)}"` : `data-act="invoice" data-arg="${esc(first.id)}"`) : '';
@@ -1063,8 +1070,9 @@
               <td>${fmtDate(r.date)}</td>
               <td><span class="tag">${esc(r.method)}</span></td>
               <td class="r amount">${money(r.amount)}</td>
+              ${isAdmin() ? `<td class="r"><span class="row-actions"><button class="btn ghost icon sm" data-act="form" data-arg="receipt" data-arg2="${esc(r.key)}" title="Edit or void payment" aria-label="Edit payment ${esc(r.reference)}">${icon('pencil', 'sm')}</button></span></td>` : ''}
             </tr>`;
-          }).join('') : `<tr><td colspan="6">${emptyState('payments', 'No collections yet', 'Guest payments received by the front office will appear here.')}</td></tr>`}</tbody>
+          }).join('') : `<tr><td colspan="${isAdmin() ? 7 : 6}">${emptyState('payments', 'No collections yet', 'Guest payments received by the front office will appear here.')}</td></tr>`}</tbody>
         </table></div>
       </section>`;
   }
@@ -1555,6 +1563,48 @@
         </div>`, footer(isAdmin() ? 'Post invoice' : 'Post bill'), 'bills');
     }
 
+    if (kind === 'receipt') {
+      if (!isAdmin()) return toast('Only head office can change payments.');
+      const r = receiptsList().find((x) => x.key === arg);
+      if (!r) return toast('That payment no longer exists.');
+      const first = r.bills[0];
+      return modal(`Payment ${esc(r.reference)}`, `${first ? esc(first.customer) + ' · ' : ''}${esc(currency())} ${money(r.amount)} · covers ${r.bills.length} invoice${r.bills.length === 1 ? '' : 's'}`,
+        `<input type="hidden" name="receipt" value="${esc(r.key)}">
+        <div class="field"><span>Payment status</span><div class="seg pay-status" role="radiogroup" aria-label="Payment status">
+          <label><input type="radio" name="status" value="received" checked data-change="payStatus"><span>${icon('checkCircle', 'sm')} Received</span></label>
+          <label><input type="radio" name="status" value="void" data-change="payStatus"><span>${icon('x', 'sm')} Void</span></label>
+        </div></div>
+        <div class="form-grid" data-pay="edit">
+          ${field('Payment date', 'date', 'date', r.date, `max="${today()}"`)}
+          <label class="field"><span>Payment method</span><select name="method">${METHODS.map((m) => `<option ${m === r.method ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+          <label class="field wide"><span>Receipt / reference</span><input name="reference" value="${esc(r.reference)}" maxlength="100" required></label>
+        </div>
+        <div data-pay="void" hidden>
+          <div class="alert warn">${icon('alert', 'sm')}<span>Voiding removes this payment of ${esc(currency())} ${money(r.amount)}. ${r.bills.map((b) => esc(b.number)).join(', ')} will show as unpaid again${first && stayOf(first)?.status !== 'active' ? ', and you may want to reopen the folio' : ''}.</span></div>
+          <label class="field"><span>Reason <span class="hint">· recorded in the activity log</span></span><input name="reason" maxlength="200" placeholder="e.g. Card payment reversed by bank"></label>
+        </div>
+        <table class="mini-alloc"><tbody>${r.bills.map((b) => `<tr><td class="mono">${esc(b.number)}</td><td>${esc(outletName(b.outlet_id))}</td><td class="r">${money(data.payments.filter((p) => (p.settlement_id || p.id) === r.key && p.bill_id === b.id).reduce((t, p) => t + p.amount, 0))}</td></tr>`).join('')}</tbody></table>`,
+        `<button type="button" class="btn" data-act="close">Cancel</button><button type="submit" class="btn primary" id="paySubmit">Save changes</button>`, 'payment-update');
+    }
+
+    if (kind === 'stay-delete') {
+      if (!isAdmin()) return toast('Only head office can delete folios.');
+      const s = stays().find((x) => x.id === arg);
+      if (!s) return toast('That folio no longer exists.');
+      const bills = billsForStay(arg);
+      const paid = bills.reduce((t, b) => t + paidFor(b.id), 0);
+      return modal('Delete this folio?', `${esc(s.guest_name)} · Room ${esc(s.room)} · ${esc(s.property)}`,
+        `<input type="hidden" name="stay_id" value="${esc(s.id)}">
+        <div class="delete-card">
+          <div><span class="mono">F-${esc(String(s.id).slice(0, 8).toUpperCase())}</span><strong>${esc(currency())} ${money(sum(bills))}</strong></div>
+          <p>${fmtDate(s.arrival)} – ${fmtDate(s.departure)} · ${s.status === 'active' ? 'In house' : 'Checked out'}</p>
+          <p>${bills.length} invoice${bills.length === 1 ? '' : 's'}${paid ? ` · ${esc(currency())} ${money(paid)} in payments` : ' · no payments'}</p>
+        </div>
+        <div class="alert error">${icon('alert', 'sm')}<span>This permanently deletes the stay and everything on it: ${bills.length} invoice${bills.length === 1 ? '' : 's'}${paid ? ' and their payments' : ''}. It can’t be undone. To change a closed folio instead, use Reopen folio.</span></div>
+        <label class="field"><span>Type DELETE to confirm</span><input name="confirm" required autocomplete="off" pattern="[Dd][Ee][Ll][Ee][Tt][Ee]" placeholder="DELETE"></label>`,
+        `<button type="button" class="btn" data-act="close">Keep folio</button><button type="submit" class="btn danger-solid">${icon('trash', 'sm')} Delete folio</button>`, 'stay-delete');
+    }
+
     if (kind === 'bill-edit' || kind === 'bill-delete') {
       if (!isAdmin()) return toast('Only head office can change invoices.');
       const b = data.bills.find((x) => x.id === arg);
@@ -1565,7 +1615,11 @@
       if (kind === 'bill-delete') {
         if (paid > 0) {
           return modal('Can’t delete this invoice', `${esc(b.number)} · ${esc(outletName(b.outlet_id))}`,
-            `<div class="alert warn">${icon('alert', 'sm')}<span>${esc(currency())} ${money(paid)} has already been collected on this invoice, so deleting it would unbalance the guest’s folio. Edit the amount or description instead.</span></div>`,
+            `<div class="alert warn">${icon('alert', 'sm')}<span>${esc(currency())} ${money(paid)} has already been collected on this invoice. Void the payment first, then delete the invoice. Or edit the amount or description instead.</span></div>
+            <div class="receipt-pick">${[...new Set(data.payments.filter((p) => p.bill_id === b.id).map((p) => p.settlement_id || p.id))].map((k) => {
+              const r = receiptsList().find((x) => x.key === k);
+              return r ? `<button type="button" class="btn block" data-act="form" data-arg="receipt" data-arg2="${esc(k)}">${icon('payments', 'sm')} <span class="mono">${esc(r.reference)}</span> · ${fmtDate(r.date)} · ${esc(currency())} ${money(r.amount)}<span class="spacer"></span>Void or edit</button>` : '';
+            }).join('')}</div>`,
             `<button type="button" class="btn" data-act="close">Close</button><button type="button" class="btn primary" data-act="form" data-arg="bill-edit" data-arg2="${esc(b.id)}">${icon('pencil', 'sm')} Edit invoice</button>`);
         }
         return modal('Delete invoice?', 'This permanently removes the charge from the guest’s folio.',
@@ -1868,13 +1922,26 @@
         values.reference = `${values.reference} · paid ${pc} ${amt.toFixed(2)} at ${fxText(payRate)}`.slice(0, 100);
       }
     }
+    let endpoint = name;
+    if (name === 'payment-update') {
+      if (values.status === 'void') {
+        if (String(values.reason || '').trim().length < 3) {
+          errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Give a short reason for voiding this payment.</span></div>`;
+          return;
+        }
+        endpoint = 'payment-void';
+      }
+      delete values.status;
+    }
     if (!requireLive()) return;
     btn.disabled = true;
     try {
-      await post(name, values);
+      await post(endpoint, values);
       if (name !== 'settings') closeOverlay();
+      if (name === 'stay-delete') ui.selectedStay = null;
       await load();
-      toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'bill-update': 'Invoice updated.', 'bill-delete': 'Invoice deleted.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.' }[name] || 'Saved to your workspace.');
+      if (name === 'stay-delete') render();
+      toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'bill-update': 'Invoice updated.', 'bill-delete': 'Invoice deleted.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.', 'payment-update': 'Payment updated.', 'payment-void': 'Payment voided. The invoices are open again.', 'stay-delete': 'Folio deleted.' }[endpoint] || 'Saved to your workspace.');
     } catch (err) {
       errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
       btn.disabled = false;
@@ -1999,10 +2066,11 @@
   async function guestAction(action, stayId) {
     if (!requireLive()) return;
     if (action === 'checkout' && !confirm('Complete checkout and close this guest’s folio?')) return;
+    if (action === 'stay-reopen' && !confirm('Reopen this folio? The guest shows as in house again, so charges can be posted and payments collected.')) return;
     try {
       await post(action, { stay_id: stayId });
       await load();
-      toast(action === 'checkout' ? 'Guest checked out. Folio closed.' : 'All guest charges approved.');
+      toast({ checkout: 'Guest checked out. Folio closed.', 'stay-reopen': 'Folio reopened.' }[action] || 'All guest charges approved.');
     } catch (err) {
       const box = document.getElementById('guestActionError');
       if (box) box.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
@@ -2220,6 +2288,7 @@
     'guest-filter': (v) => { ui.guestFilter = v; render(); },
     settle: (id) => openForm('settle', id),
     checkout: (id) => guestAction('checkout', id),
+    'stay-reopen': (id) => guestAction('stay-reopen', id),
     'approve-stay': (id) => guestAction('approve-stay', id),
     status: (s) => { ui.statusFilter = s; render(); },
     'clear-filters': () => { ui.search = ''; ui.statusFilter = ''; ui.outletFilter = ''; render(); },
@@ -2417,6 +2486,15 @@
       const n = document.getElementById('invoiceNumber');
       const auto = e.target.form.querySelector('[name=num_mode]:checked')?.value !== 'own';
       if (n && auto) n.value = nextInvoiceNumber(e.target.value);
+    }
+    if (e.target.dataset.change === 'payStatus') {
+      const form = e.target.form, isVoid = e.target.value === 'void';
+      form.querySelector('[data-pay="edit"]').hidden = isVoid;
+      form.querySelector('[data-pay="void"]').hidden = !isVoid;
+      const sb = form.querySelector('#paySubmit');
+      sb.className = isVoid ? 'btn danger-solid' : 'btn primary';
+      sb.textContent = isVoid ? 'Void payment' : 'Save changes';
+      if (isVoid) form.querySelector('[name=reason]').focus();
     }
     if (e.target.dataset.change === 'numMode') {
       const form = e.target.form, n = document.getElementById('invoiceNumber'), hint = document.getElementById('numHint');

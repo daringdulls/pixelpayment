@@ -65,15 +65,22 @@ Head office sets the rate in **Settings → Currencies** (MVR per 1 USD). Then:
 - Folios and invoices show the balance due in both currencies.
 The rate is stored with the branding row (`pixel_branding`); saving it does not change any other branding field.
 
-## Editing and deleting invoices (head office)
+## Corrections by head office (invoices, payments, folios)
 
-Administrators see **Edit** and **Delete** buttons on every invoice row and in the invoice document toolbar. Outlet staff never see them, and the server checks the role on every request.
+Only administrators see these controls. Outlet staff never do, and the server checks the role on every request.
 
-- **Edit** lets you change the invoice number (it must stay unique per outlet), the guest stay, the invoice and due dates, the amount and the description. The amount can't go below what has already been collected.
-- **Delete** is only allowed when nothing has been paid on the invoice. A paid invoice should be edited instead.
-- Both changes are recorded in the activity log.
+| What | Where | Rules |
+|---|---|---|
+| Edit an invoice | Invoice row or invoice page → pencil | Number stays unique per outlet; the amount can't go below what has been collected |
+| Delete an invoice | Invoice row or invoice page → bin | Only when nothing has been paid. Void the payment first if needed |
+| Edit a payment | Payments page → pencil, or click a payment line on the folio | Change date, method and reference |
+| Void a payment | Same form → status **Void** | Needs a reason; the invoices it covered become unpaid again |
+| Reopen a folio | Checked-out folio → **Reopen folio** | Guest shows as in house again |
+| Delete a folio | Folio → bin, type DELETE | Removes the stay with all its invoices and payments |
 
-The routes are `POST /api/bill-update` and `POST /api/bill-delete`, handled in `api/_bills.js`. They call the database functions `pixel_bill_update` and `pixel_bill_delete` with the server-side secret key. Until those functions are created with the one-time `pixel_bill_admin` SQL script, the buttons show a "needs a one-time database setup" message.
+Every change is written to the activity log.
+
+API routes (all in `api/_bills.js`): `bill-update`, `bill-delete`, `payment-update`, `payment-void`, `stay-reopen`, `stay-delete`. They call database functions with the server-side secret key. Create the functions once by running `supabase/migrations/20261115120000_pixel_bill_admin.sql` in the Supabase SQL Editor. It first checks the ledger tables and stops with a clear message, changing nothing, if a column it needs is missing. Until it has run, the buttons show a "needs a one-time database setup" message.
 
 ## API used by the frontend
 `GET /api/config`, `GET /api/data`, `GET /api/rates`, `GET /api/branding`, `POST /api/{branding-save|rates-save|staff-create|staff-reset|stays|outlets|bills|members|payments|settle|settings|approve|approve-stay|checkout|link-bill}`

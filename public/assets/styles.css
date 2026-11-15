@@ -1370,3 +1370,20 @@ tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
 .delete-card div strong { font-family: var(--display); font-size: 18px; }
 .delete-card p { font-size: 13px; color: var(--muted); }
 @media (hover: none) { .row-actions { opacity: 1; } }
+
+/* PixelateMV mark: navy tile with the leaf corner (top-right + bottom-left), white P + lagoon wave */
+.mark, .sidebar .mark, .auth-aside .mark { background: #0B1E6B; border-radius: 0 10px 0 10px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); }
+.mark svg.px { width: 62%; height: 62%; display: block; }
+
+/* Payment status, receipt allocation, receipt picker */
+.pay-status label span { display: inline-flex; align-items: center; gap: 6px; }
+.pay-status input[value="void"]:checked + span { border-color: var(--coral, #E0674B); color: #A8432D; background: #FCEDE8; }
+.mini-alloc { width: 100%; margin-top: 14px; font-size: 13.5px; border-collapse: collapse; }
+.mini-alloc td { padding: 7px 0; border-top: 1px solid var(--line, #E3E7F1); }
+.mini-alloc td.r { text-align: right; font-variant-numeric: tabular-nums; }
+.receipt-pick { display: grid; gap: 8px; margin-top: 12px; }
+.receipt-pick .btn { justify-content: flex-start; gap: 8px; }
+.receipt-pick .spacer { flex: 1; }
+.st-lines tr.st-pay.clickable { cursor: pointer; }
+.st-lines tr.st-pay.clickable:hover td { background: rgba(15, 110, 106, .06); }
+@media print { .st-lines tr.st-pay.clickable:hover td { background: none; } }
