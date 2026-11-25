@@ -4,6 +4,7 @@
 --   pixel_payment_update, pixel_payment_void     edit / void a payment receipt
 --   pixel_stay_reopen, pixel_stay_delete         reopen / delete a guest folio
 --   pixel_member_rename                          move a staff login's role/outlet to its new username
+-- and the table public.pixel_staff_roles, which marks front-office cashiers.
 -- Browsers cannot call them: execute is revoked from anon and authenticated.
 -- Safe to run more than once.
 
@@ -158,5 +159,16 @@ begin
     execute format('grant execute on function public.%s to service_role', f);
   end loop;
 end $$;
+
+-- 8. Front-office cashiers. In the ledger a cashier is an "admin" (sees every folio, collects payment);
+--    this list lets the app keep them out of staff logins, settings, outlets, rates and corrections.
+create table if not exists public.pixel_staff_roles (
+  email text primary key check (email = lower(email)),
+  role text not null check (role in ('cashier')),
+  created_at timestamptz not null default now()
+);
+alter table public.pixel_staff_roles enable row level security;
+revoke all on public.pixel_staff_roles from public, anon, authenticated;
+grant select, insert, update, delete on public.pixel_staff_roles to service_role;
 
 notify pgrst, 'reload schema';

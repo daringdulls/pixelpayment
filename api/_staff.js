@@ -4,6 +4,8 @@
 // Every request is checked against the caller's workspace membership first:
 // only head office administrators may manage logins, and only for their own workspace.
 
+import { setCashier, renameCashier } from './_roles.js';
+
 const USERNAME = /^[a-z0-9][a-z0-9._-]{2,31}$/;
 
 export async function staff(req, res, path, { endpoint, key, domain }) {
@@ -74,11 +76,19 @@ export async function staff(req, res, path, { endpoint, key, domain }) {
         const missing = moved.status === 404 || /PGRST202|Could not find the function/i.test(JSON.stringify(err));
         return res.status(missing ? 503 : 400).json({ error: missing ? 'Renaming needs the one-time database setup (the pixel_bill_admin SQL script).' : (err.message || 'Could not rename the membership.') });
       }
+      // Move a cashier marker before the login, so the renamed login never has head-office access.
+      const recast = await renameCashier(endpoint, from, to);
+      const recastOk = recast.ok || recast.status === 404;
+      if (!recastOk) {
+        await rpc('pixel_member_rename', { p_old: to, p_new: from, p_actor: actor });
+        return res.status(502).json({ error: 'Could not rename the login. Nothing was changed.' });
+      }
       const updated = await authAdmin('users/' + login.id, {
         method: 'PUT',
         body: JSON.stringify({ email: to, email_confirm: true, user_metadata: { ...(login.user_metadata || {}), username } }),
       });
       if (!updated.ok) {
+        await renameCashier(endpoint, to, from);
         await rpc('pixel_member_rename', { p_old: to, p_new: from, p_actor: actor }); // undo the membership move
         return res.status(502).json({ error: 'Could not rename the login. Nothing was changed.' });
       }
@@ -94,9 +104,20 @@ export async function staff(req, res, path, { endpoint, key, domain }) {
       if (!USERNAME.test(username)) {
         return res.status(400).json({ error: 'Usernames are 3–32 characters (letters, numbers, dots, dashes or underscores) and start with a letter or number.' });
       }
-      if (!['admin', 'outlet'].includes(body.role)) return res.status(400).json({ error: 'Choose a role.' });
+      if (!['admin', 'outlet', 'cashier'].includes(body.role)) return res.status(400).json({ error: 'Choose a role.' });
+      const cashier = body.role === 'cashier';
       const email = username + '@' + domain;
       if (members.includes(email)) return res.status(409).json({ error: 'That username is already in use.' });
+      // Cashiers: record the role first, so a cashier never exists with full head-office access.
+      if (cashier) {
+        const marked = await setCashier(endpoint, email, true);
+        if (!marked.ok) {
+          const err = await marked.json().catch(() => ({}));
+          const missing = marked.status === 404 || /PGRST205|does not exist|Could not find the table/i.test(JSON.stringify(err));
+          return res.status(missing ? 503 : 502).json({ error: missing ? 'Cashier logins need the one-time database setup (the pixel_bill_admin SQL script).' : 'Could not create the cashier role.' });
+        }
+      }
+      const undoCashier = () => (cashier ? setCashier(endpoint, email, false) : null);
 
       const created = await authAdmin('users', {
         method: 'POST',
@@ -104,14 +125,19 @@ export async function staff(req, res, path, { endpoint, key, domain }) {
       });
       const user = await created.json().catch(() => ({}));
       if (!created.ok) {
+        await undoCashier();
         const taken = created.status === 422 || /already/i.test(user.msg || user.message || '');
         return res.status(taken ? 409 : 502).json({ error: taken ? 'That username is already in use.' : (user.msg || user.message || 'Could not create the login.') });
       }
 
-      const assign = await ledger('/api/members', { method: 'POST', body: JSON.stringify({ email, role: body.role, outlet_id: body.outlet_id }) });
+      // In the ledger a cashier is an administrator (to see every folio and collect payment);
+      // this server's cashier list keeps them out of head-office-only actions.
+      const ledgerRole = cashier ? 'admin' : body.role;
+      const assign = await ledger('/api/members', { method: 'POST', body: JSON.stringify({ email, role: ledgerRole, outlet_id: ledgerRole === 'outlet' ? body.outlet_id : undefined }) });
       if (!assign.ok) {
         const err = await assign.json().catch(() => ({}));
         await authAdmin('users/' + user.id, { method: 'DELETE' }); // roll back the orphaned login
+        await undoCashier();
         return res.status(assign.status).json({ error: err.error || 'Could not assign the role.' });
       }
       return res.status(200).json({ ok: true, username });

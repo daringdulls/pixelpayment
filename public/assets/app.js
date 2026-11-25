@@ -175,6 +175,10 @@
    * Domain selectors
    * ------------------------------------------------------------------ */
   const isAdmin = () => data?.member?.role === 'admin';
+  // Front-office cashier: sees every folio and collects payment, but no staff, settings, outlets or corrections.
+  const isCashier = () => isAdmin() && data?.member?.app_role === 'cashier';
+  const canManage = () => isAdmin() && !isCashier();
+  const roleLabel = (m) => (m.app_role === 'cashier' ? 'Front office cashier' : m.role === 'admin' ? 'Head office administrator' : `Outlet staff · ${outletName(m.outlet_id)}`);
   const currency = () => data.settings.currency;
   const paidFor = (billId) => sum(data.payments.filter((p) => p.bill_id === billId));
   const outstanding = (bill) => bill.amount - paidFor(bill.id);
@@ -511,7 +515,12 @@
   const NAV_OUTLET = [
     { group: 'My outlet', items: [['Invoices', 'invoices', 'My bills'], ['Rates', 'tag', 'Rate card'], ['Guests', 'guests', 'Guest lookup'], ['Payments', 'payments', 'Collections']] },
   ];
-  const navFor = () => (isAdmin() ? NAV_ADMIN : NAV_OUTLET);
+  const NAV_CASHIER = [
+    { group: 'Overview', items: [['Overview', 'overview', 'Dashboard']] },
+    { group: 'Front office', items: [['Guests', 'guests', 'Guests & folios'], ['Payments', 'payments', 'Payments']] },
+    { group: 'Billing', items: [['Invoices', 'invoices', 'Invoices']] },
+  ];
+  const navFor = () => (isCashier() ? NAV_CASHIER : isAdmin() ? NAV_ADMIN : NAV_OUTLET);
   const allowedPages = () => navFor().flatMap((g) => g.items.map((i) => i[0]));
   const pageLabel = (p) => navFor().flatMap((g) => g.items).find((i) => i[0] === p)?.[2] || p;
   const myOutletName = () => data.outlets[0]?.name || 'your outlet';
@@ -542,7 +551,7 @@
     if (!ui.page || !allowedPages().includes(ui.page)) ui.page = isAdmin() ? 'Overview' : 'Invoices';
     const pending = data.bills.filter((b) => b.status === 'pending').length;
     const myOutlet = !isAdmin() && data.outlets.find((o) => o.id === data.member?.outlet_id);
-    const who = isAdmin() ? 'Head office' : myOutlet ? myOutlet.name + ' staff' : 'Outlet staff';
+    const who = isCashier() ? 'Front office cashier' : isAdmin() ? 'Head office' : myOutlet ? myOutlet.name + ' staff' : 'Outlet staff';
     const nav = navFor().map((g) => `
       <div class="nav-group">
         <div class="nav-label">${g.group}</div>
@@ -581,9 +590,9 @@
           </header>
           <main class="content" id="content">
             ${pageHeader()}
-            ${demo ? banner('demo', 'eye', demoRole === 'admin' ? 'Demo · viewing as head office' : 'Demo · viewing as outlet staff (Cozy Scuba Club)', 'Switch roles to see what each user sees. Changes are disabled in the demo.',
-              `<div class="chips" role="group" aria-label="View demo as"><button class="chip" aria-pressed="${demoRole === 'admin'}" data-act="demo-role" data-arg="admin">Head office</button><button class="chip" aria-pressed="${demoRole === 'outlet'}" data-act="demo-role" data-arg="outlet">Outlet staff</button></div><button class="btn sm" data-act="demo">Exit demo</button>`) : ''}
-            ${!demo && !data.outlets.length ? banner('', 'building', 'Your workspace is ready', 'Add your first outlet to begin posting daily invoices.', isAdmin() ? `<button class="btn sm primary" data-act="form" data-arg="outlet">${icon('plus', 'sm')} Add outlet</button>` : '') : ''}
+            ${demo ? banner('demo', 'eye', demoRole === 'admin' ? 'Demo · viewing as head office' : demoRole === 'cashier' ? 'Demo · viewing as front office cashier' : 'Demo · viewing as outlet staff (Cozy Scuba Club)', 'Switch roles to see what each user sees. Changes are disabled in the demo.',
+              `<div class="chips" role="group" aria-label="View demo as"><button class="chip" aria-pressed="${demoRole === 'admin'}" data-act="demo-role" data-arg="admin">Head office</button><button class="chip" aria-pressed="${demoRole === 'cashier'}" data-act="demo-role" data-arg="cashier">Cashier</button><button class="chip" aria-pressed="${demoRole === 'outlet'}" data-act="demo-role" data-arg="outlet">Outlet staff</button></div><button class="btn sm" data-act="demo">Exit demo</button>`) : ''}
+            ${!demo && !data.outlets.length ? banner('', 'building', 'Your workspace is ready', 'Add your first outlet to begin posting daily invoices.', canManage() ? `<button class="btn sm primary" data-act="form" data-arg="outlet">${icon('plus', 'sm')} Add outlet</button>` : '') : ''}
             ${pageBody()}
             <footer class="footer"><span>© ${new Date().getFullYear()} ${esc(data.settings.company)} · Powered by Pixel Payment</span><span>All amounts in ${esc(currency())} · Times shown in Maldives time</span></footer>
           </main>
@@ -638,7 +647,7 @@
     } else if (['Overview', 'Invoices', 'Payments'].includes(ui.page)) {
       actions.push(newBill);
     }
-    const eyebrow = isAdmin() ? 'Head office' : esc(myOutletName());
+    const eyebrow = isCashier() ? 'Front office' : isAdmin() ? 'Head office' : esc(myOutletName());
     return `<div class="page-head"><div><div class="page-eyebrow">${eyebrow}</div><h1>${title}</h1><p>${sub}</p></div><div class="page-actions">${actions.join('')}</div></div>`;
   }
 
@@ -752,7 +761,7 @@
         : `<button class="btn primary" data-act="checkout" data-arg="${esc(id)}">${icon('logout', 'sm')} Complete checkout</button>`;
     }
 
-    const adminTools = isAdmin() ? `${s.status === 'active' ? '' : `<button class="btn" data-act="stay-reopen" data-arg="${esc(id)}">${icon('refresh', 'sm')} Reopen folio</button>`}
+    const adminTools = canManage() ? `${s.status === 'active' ? '' : `<button class="btn" data-act="stay-reopen" data-arg="${esc(id)}">${icon('refresh', 'sm')} Reopen folio</button>`}
           <button class="btn ghost icon danger" data-act="form" data-arg="stay-delete" data-arg2="${esc(id)}" title="Delete folio" aria-label="Delete folio">${icon('trash', 'sm')}</button>` : '';
 
     return `
@@ -767,7 +776,7 @@
       </div>
       <div id="guestActionError" class="form-error" style="margin-bottom:12px"></div>
       ${!isAdmin() ? banner('', 'info', 'Outlet view', 'Only your outlet’s charges and collections are shown on this folio.') : ''}
-      ${isAdmin() && s.status !== 'active' ? banner('', 'info', 'Folio closed', 'This guest has checked out. Reopen the folio to post more charges, collect again or make corrections.') : ''}
+      ${isAdmin() && s.status !== 'active' ? banner('', 'info', 'Folio closed', canManage() ? 'This guest has checked out. Reopen the folio to post more charges, collect again or make corrections.' : 'This guest has checked out. Ask head office if the folio needs to be reopened or corrected.') : ''}
       ${pending ? banner('warn', 'clock', `${pending} charge${pending > 1 ? 's' : ''} awaiting review`, 'Pending charges are included in the total. Approve them before collecting a consolidated payment.', isAdmin() ? `<button class="btn sm" data-act="approve-stay" data-arg="${esc(id)}">${icon('check', 'sm')} Approve all</button>` : '') : ''}
       ${folioStatement(s, bills, receipts, byOutlet, { total, paid, balance, pending, settled })}`;
   }
@@ -814,7 +823,7 @@
         ${!isAdmin() ? `<p class="st-scope">${icon('info', 'sm')} Shows ${esc(myOutletName())} charges and collections only.</p>` : ''}
         <div class="st-table"><table class="st-lines">
           <thead><tr><th>Date</th><th>Reference</th><th>Description</th><th>Outlet</th><th class="r">Charges</th><th class="r">Payments</th><th class="r">Balance</th></tr></thead>
-          <tbody>${tx.length ? tx.map((t) => `<tr class="${t.credit ? 'st-pay' : 'clickable'}${t.rid && isAdmin() ? ' clickable' : ''}" ${t.id ? `tabindex="0" data-act="invoice" data-arg="${esc(t.id)}"` : t.rid && isAdmin() ? `tabindex="0" data-act="form" data-arg="receipt" data-arg2="${esc(t.rid)}" title="Edit or void this payment"` : ''}>
+          <tbody>${tx.length ? tx.map((t) => `<tr class="${t.credit ? 'st-pay' : 'clickable'}${t.rid && canManage() ? ' clickable' : ''}" ${t.id ? `tabindex="0" data-act="invoice" data-arg="${esc(t.id)}"` : t.rid && canManage() ? `tabindex="0" data-act="form" data-arg="receipt" data-arg2="${esc(t.rid)}" title="Edit or void this payment"` : ''}>
             <td>${fmtDate(t.date)}</td><td class="mono">${esc(t.ref)}</td>
             <td class="wrap">${esc(t.desc)}${t.pending ? ' <span class="st-flag">Pending review</span>' : ''}</td><td>${esc(t.outlet)}</td>
             <td class="r">${t.charge ? money(t.charge) : ''}</td><td class="r">${t.credit ? money(t.credit) : ''}</td><td class="r">${money(t.balance)}</td>
@@ -997,7 +1006,7 @@
         <td class="r amount">${money(b.amount)}</td>
         <td class="r muted-amount">${money(outstanding(b))}</td>
         <td>${statusBadge(b)}</td>
-        <td class="r">${isAdmin() ? `<span class="row-actions">
+        <td class="r">${canManage() ? `<span class="row-actions">
           <button class="btn ghost icon sm" data-act="form" data-arg="bill-edit" data-arg2="${esc(b.id)}" title="Edit invoice" aria-label="Edit ${esc(b.number)}">${icon('pencil', 'sm')}</button>
           <button class="btn ghost icon sm danger" data-act="form" data-arg="bill-delete" data-arg2="${esc(b.id)}" title="Delete invoice" aria-label="Delete ${esc(b.number)}">${icon('trash', 'sm')}</button>
         </span>` : `<span class="row-arrow">${icon('chevronRight', 'sm')}</span>`}</td>
@@ -1065,7 +1074,7 @@
       <section class="card">
         <div class="card-head"><div><h2>Payment receipts</h2><p>One receipt per guest payment. Invoice allocations are included in the CSV export.</p></div>${isAdmin() ? `<button class="link" data-act="nav" data-arg="Guests">Collect from a guest ${icon('arrowRight', 'sm')}</button>` : ''}</div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Reference</th><th>Guest</th><th>Covers</th><th>Date</th><th>Method</th><th class="r">Amount (${esc(currency())})</th>${isAdmin() ? '<th class="r"><span class="sr-only">Actions</span></th>' : ''}</tr></thead>
+          <thead><tr><th>Reference</th><th>Guest</th><th>Covers</th><th>Date</th><th>Method</th><th class="r">Amount (${esc(currency())})</th>${canManage() ? '<th class="r"><span class="sr-only">Actions</span></th>' : ''}</tr></thead>
           <tbody>${receipts.length ? receipts.map((r) => {
             const first = r.bills[0];
             const target = first ? (first.stay_id ? `data-act="guest-from" data-arg="${esc(first.stay_id)}"` : `data-act="invoice" data-arg="${esc(first.id)}"`) : '';
@@ -1076,9 +1085,9 @@
               <td>${fmtDate(r.date)}</td>
               <td><span class="tag">${esc(r.method)}</span></td>
               <td class="r amount">${money(r.amount)}</td>
-              ${isAdmin() ? `<td class="r"><span class="row-actions"><button class="btn ghost icon sm" data-act="form" data-arg="receipt" data-arg2="${esc(r.key)}" title="Edit or void payment" aria-label="Edit payment ${esc(r.reference)}">${icon('pencil', 'sm')}</button></span></td>` : ''}
+              ${canManage() ? `<td class="r"><span class="row-actions"><button class="btn ghost icon sm" data-act="form" data-arg="receipt" data-arg2="${esc(r.key)}" title="Edit or void payment" aria-label="Edit payment ${esc(r.reference)}">${icon('pencil', 'sm')}</button></span></td>` : ''}
             </tr>`;
-          }).join('') : `<tr><td colspan="${isAdmin() ? 7 : 6}">${emptyState('payments', 'No collections yet', 'Guest payments received by the front office will appear here.')}</td></tr>`}</tbody>
+          }).join('') : `<tr><td colspan="${canManage() ? 7 : 6}">${emptyState('payments', 'No collections yet', 'Guest payments received by the front office will appear here.')}</td></tr>`}</tbody>
         </table></div>
       </section>`;
   }
@@ -1308,11 +1317,11 @@
         </form>
       </section>
       <section class="card">
-        <div class="card-head"><div><h2>Staff &amp; logins</h2><p>Head office sees everything; outlet staff see only their outlet.</p></div><button class="btn sm primary" data-act="form" data-arg="user">${icon('userPlus', 'sm')} Add user</button></div>
+        <div class="card-head"><div><h2>Staff &amp; logins</h2><p>Head office sees everything. Cashiers handle folios and payments. Outlet staff see only their outlet.</p></div><button class="btn sm primary" data-act="form" data-arg="user">${icon('userPlus', 'sm')} Add user</button></div>
         ${data.members.map((m) => `<div class="list-row">
           <span class="avatar">${esc(initials(loginName(m.email)))}</span>
-          <div class="grow"><strong>${esc(loginName(m.email))}</strong><small>${isUsernameLogin(m.email) ? 'Username login' : 'Email login'} · ${m.role === 'admin' ? 'All outlets' : esc(outletName(m.outlet_id))}</small></div>
-          <span class="badge ${m.role === 'admin' ? 'info' : 'neutral'}">${m.role === 'admin' ? 'Admin' : 'Outlet'}</span>
+          <div class="grow"><strong>${esc(loginName(m.email))}</strong><small>${isUsernameLogin(m.email) ? 'Username login' : 'Email login'} · ${m.app_role === 'cashier' ? 'Front office · all folios' : m.role === 'admin' ? 'All outlets' : esc(outletName(m.outlet_id))}</small></div>
+          <span class="badge ${m.app_role === 'cashier' ? 'success' : m.role === 'admin' ? 'info' : 'neutral'}">${m.app_role === 'cashier' ? 'Cashier' : m.role === 'admin' ? 'Admin' : 'Outlet'}</span>
           ${isUsernameLogin(m.email) ? `<button class="btn ghost icon sm" data-act="form" data-arg="user-rename" data-arg2="${esc(m.email)}" title="Change username" aria-label="Change username for ${esc(loginName(m.email))}">${icon('pencil', 'sm')}</button>` : ''}
           <button class="btn ghost icon sm" data-act="form" data-arg="reset" data-arg2="${esc(m.email)}" title="Reset password" aria-label="Reset password for ${esc(loginName(m.email))}">${icon('key', 'sm')}</button>
         </div>`).join('')}
@@ -1546,7 +1555,7 @@
   function openForm(kind, arg) {
 
     if (kind === 'bill' && !data.outlets.length) {
-      if (isAdmin()) { toast('Add your first outlet before posting invoices.'); return openForm('outlet'); }
+      if (canManage()) { toast('Add your first outlet before posting invoices.'); return openForm('outlet'); }
       return toast('Ask your administrator to assign you an outlet.');
     }
     if (kind === 'bill' && !stays().some((s) => s.status === 'active')) {
@@ -1632,7 +1641,7 @@
     }
 
     if (kind === 'receipt') {
-      if (!isAdmin()) return toast('Only head office can change payments.');
+      if (!canManage()) return toast('Only head office can change payments.');
       const r = receiptsList().find((x) => x.key === arg);
       if (!r) return toast('That payment no longer exists.');
       const first = r.bills[0];
@@ -1656,7 +1665,7 @@
     }
 
     if (kind === 'stay-delete') {
-      if (!isAdmin()) return toast('Only head office can delete folios.');
+      if (!canManage()) return toast('Only head office can delete folios.');
       const s = stays().find((x) => x.id === arg);
       if (!s) return toast('That folio no longer exists.');
       const bills = billsForStay(arg);
@@ -1674,7 +1683,7 @@
     }
 
     if (kind === 'bill-edit' || kind === 'bill-delete') {
-      if (!isAdmin()) return toast('Only head office can change invoices.');
+      if (!canManage()) return toast('Only head office can change invoices.');
       const b = data.bills.find((x) => x.id === arg);
       if (!b) return toast('That invoice no longer exists.');
       const paid = paidFor(b.id);
@@ -1721,7 +1730,8 @@
       const tabs = `<div class="auth-tabs" role="tablist" style="margin:0">
         <button type="button" role="tab" aria-selected="${mode === 'login'}" data-act="form" data-arg="user" data-arg2="login">Username &amp; password</button>
         <button type="button" role="tab" aria-selected="${mode === 'invite'}" data-act="form" data-arg="user" data-arg2="invite">Invite by email</button></div>`;
-      const roleFields = `<label class="field"><span>Role</span><select name="role" data-change="role"><option value="outlet">Outlet staff</option><option value="admin">Head office administrator</option></select></label>
+      const roleFields = `<label class="field"><span>Role</span><select name="role" data-change="role"><option value="outlet">Outlet staff</option><option value="cashier">Front office cashier</option><option value="admin">Head office administrator</option></select></label>
+        <p class="hint-line wide" data-role-hint>Posts bills for one outlet and sees only that outlet’s bills.</p>
         <label class="field" data-outlet-field><span>Outlet</span><select name="outlet_id">${outletOptions()}</select></label>`;
       if (mode === 'login') {
         return modal('Add user', 'Create a login and hand the username and password to the staff member.',
@@ -1742,7 +1752,7 @@
     if (kind === 'user-rename') {
       const m = (data.members || []).find((x) => x.email === arg) || { email: arg };
       const self = arg === data.email;
-      return modal('Change username', `${esc(loginName(arg))} · ${m.role === 'admin' ? 'Head office administrator' : 'Outlet staff · ' + esc(outletName(m.outlet_id))}`,
+      return modal('Change username', `${esc(loginName(arg))} · ${esc(roleLabel(m))}`,
         `<input type="hidden" name="email" value="${esc(arg)}">
         <div class="form-grid">
           <label class="field wide"><span>New username <span class="hint">· letters, numbers, dots, dashes</span></span><input name="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{2,31}" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(loginName(arg))}"></label>
@@ -2040,7 +2050,7 @@
         const username = name === 'staff-reset' ? loginName(values.email) : String(values.username).trim().toLowerCase();
         const lookup = name === 'staff-rename' ? username + '@' + usernameDomain : values.email;
         const m = name === 'staff-create' ? values : (data.members || []).find((x) => x.email === lookup) || {};
-        const access = m.role === 'admin' ? 'Head office administrator' : m.role === 'outlet' || m.outlet_id ? `Outlet staff · ${outletName(m.outlet_id)}` : '';
+        const access = m.role === 'cashier' ? 'Front office cashier' : m.role || m.outlet_id ? roleLabel(m) : '';
         return showCredentials({ username, password: name === 'staff-rename' ? '' : values.password, access, reset: name === 'staff-reset', renamed: name === 'staff-rename' ? loginName(values.email) : '' });
       }
       toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'staff-rename': 'Username changed.', 'bill-update': 'Invoice updated.', 'bill-delete': 'Invoice deleted.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.', 'payment-update': 'Payment updated.', 'payment-void': 'Payment voided. The invoices are open again.', 'stay-delete': 'Folio deleted.' }[endpoint] || 'Saved to your workspace.');
@@ -2074,7 +2084,7 @@
         <div class="doc-bar-title">${icon('invoices', 'sm')}<span class="mono">${esc(b.number)}</span>${statusBadge(b)}</div>
         <div class="doc-bar-actions">
           ${b.stay_id ? `<button class="btn sm ghost" data-act="guest-from" data-arg="${esc(b.stay_id)}">${icon('bed', 'sm')} Guest folio</button>` : ''}
-          ${isAdmin() ? `<button class="btn sm" data-act="form" data-arg="bill-edit" data-arg2="${esc(b.id)}">${icon('pencil', 'sm')} Edit</button>
+          ${canManage() ? `<button class="btn sm" data-act="form" data-arg="bill-edit" data-arg2="${esc(b.id)}">${icon('pencil', 'sm')} Edit</button>
           <button class="btn sm ghost danger" data-act="form" data-arg="bill-delete" data-arg2="${esc(b.id)}" title="Delete invoice" aria-label="Delete invoice">${icon('trash', 'sm')}</button>` : ''}
           <button class="btn sm" data-act="print-doc">${icon('printer', 'sm')} Print / PDF</button>
           ${primary}
@@ -2267,6 +2277,7 @@
       ],
       members: [
         { email: 'demo@pixelpayment.app', role: 'admin' },
+        { email: 'frontoffice.cashier@' + usernameDomain, role: 'admin', app_role: 'cashier' },
         { email: 'deck.cashier@' + usernameDomain, role: 'outlet', outlet_id: 'd2' },
         { email: 'scuba.desk@' + usernameDomain, role: 'outlet', outlet_id: 'd3' },
       ],
@@ -2313,6 +2324,8 @@
   function applyDemoRole() {
     if (demoRole === 'admin') {
       data = demoFull;
+    } else if (demoRole === 'cashier') {
+      data = { ...demoFull, member: { role: 'admin', app_role: 'cashier' }, email: 'frontoffice.cashier@' + usernameDomain, members: [] };
     } else {
       const outletId = 'd3';
       const bills = demoFull.bills.filter((b) => b.outlet_id === outletId);
@@ -2621,7 +2634,9 @@
     }
     if (e.target.dataset.change === 'role') {
       const f = e.target.closest('form').querySelector('[data-outlet-field]');
-      if (f) f.hidden = e.target.value === 'admin';
+      if (f) f.hidden = e.target.value !== 'outlet';
+      const h = e.target.closest('form').querySelector('[data-role-hint]');
+      if (h) h.textContent = { outlet: 'Posts bills for one outlet and sees only that outlet’s bills.', cashier: 'Sees every guest folio, registers guests, approves charges, collects payment and checks guests out. Can’t manage staff, settings, outlets, rates or corrections.', admin: 'Full access, including staff logins, settings and corrections.' }[e.target.value];
     }
   });
 

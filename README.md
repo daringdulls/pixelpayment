@@ -38,6 +38,10 @@ The key icon on each user resets their password. The server only allows this for
 
 After **Add user** or **Reset password**, a *Login details* card shows the username, the temporary password and a login link (`/?u=<username>`, which fills in the username on the sign-in page). Each one has its own Copy button. **Copy all details** copies a ready-to-send message, and the **WhatsApp** and **Email** buttons open it in those apps. The password is generated for you and shown only once. Staff change their own password from the key icon next to their name in the sidebar.
 
+**Roles.** *Head office administrator*: everything. *Front office cashier*: Dashboard, Guests & folios, Invoices and Payments; can register guests, post invoices, approve charges, collect payment and check guests out, but can't manage staff logins, settings, outlets, rate cards or make corrections. *Outlet staff*: one outlet's bills only.
+
+How the cashier role works: the ledger service only knows `admin` and `outlet`, so a cashier is an `admin` there and is also listed in `public.pixel_staff_roles` (created by the `pixel_bill_admin` SQL script). The Vercel relay (`api/handler.js` with `api/_roles.js`) refuses head-office-only routes for anyone on that list. If the list can't be read, it refuses those routes rather than letting them through. Limitation: someone calling the ledger service directly, bypassing this app, would get full admin rights; closing that needs a cashier check inside the ledger service itself.
+
 To rename a username login, click the pencil next to it in **Settings → Staff & logins**. The sign-in account and the role/outlet assignment move together; the password, role and past invoices stay the same, and you get the new login details to send. Email logins can't be renamed. This needs the same one-time `pixel_bill_admin` SQL script (it includes `pixel_member_rename`).
 
 ## Rate cards & itemised bills
