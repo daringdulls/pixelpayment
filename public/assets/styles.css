@@ -1406,3 +1406,6 @@ tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
   .cred-label { grid-column: 1 / -1; }
   .modal-foot .spacer { display: none; }
 }
+
+/* "New guest? Register them" link under the guest picker */
+.new-guest { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 14px; }

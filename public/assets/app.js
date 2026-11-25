@@ -641,7 +641,7 @@
     if (['Overview', 'Invoices', 'Payments'].includes(ui.page)) actions.push(`<button class="btn" data-act="export">${icon('download', 'sm')} Export CSV</button>`);
     if (ui.page === 'Guests') {
       actions.push(`<button class="btn" data-act="refresh">${icon('refresh', 'sm')} Refresh</button>`);
-      actions.push(isAdmin() ? `<button class="btn primary" data-act="form" data-arg="stay">${icon('userPlus', 'sm')} Register guest</button>` : newBill);
+      actions.push(isAdmin() ? `<button class="btn primary" data-act="form" data-arg="stay">${icon('userPlus', 'sm')} Register guest</button>` : `<button class="btn" data-act="form" data-arg="stay">${icon('userPlus', 'sm')} Register guest</button>${newBill}`);
     } else if (ui.page === 'Outlets') {
       actions.push(`<button class="btn primary" data-act="form" data-arg="outlet">${icon('plus', 'sm')} Add outlet</button>`);
     } else if (['Overview', 'Invoices', 'Payments'].includes(ui.page)) {
@@ -718,8 +718,8 @@
       .sort((a, b) => (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1) || String(a.room).localeCompare(String(b.room), undefined, { numeric: true }));
     if (!rows.length) {
       return `<tr><td colspan="7">${emptyState('guests', stays().length ? 'No matching guests' : 'No guests registered yet',
-        stays().length ? 'Try a different search or status filter.' : (isAdmin() ? 'Register a guest with their room and property to open a shared folio.' : 'Ask the front office to register your guests first.'),
-        !stays().length && isAdmin() ? `<button class="btn primary" data-act="form" data-arg="stay">${icon('userPlus', 'sm')} Register guest</button>` : '')}</td></tr>`;
+        stays().length ? 'Try a different search or status filter.' : 'Register a guest with their room and property to open a shared folio.',
+        !stays().length ? `<button class="btn primary" data-act="form" data-arg="stay">${icon('userPlus', 'sm')} Register guest</button>` : '')}</td></tr>`;
     }
     return rows.map((s) => {
       const bills = billsForStay(s.id);
@@ -1559,14 +1559,15 @@
       return toast('Ask your administrator to assign you an outlet.');
     }
     if (kind === 'bill' && !stays().some((s) => s.status === 'active')) {
-      toast('Register the guest at the front office first.');
-      if (isAdmin()) openForm('stay');
-      return;
+      toast('No guests are staying yet. Register the guest first.');
+      return openForm('stay', 'bill');
     }
 
     if (kind === 'stay') {
       return modal('Register guest stay', 'Opens a new folio that every outlet can post charges to.',
-        `<div class="form-grid">
+        `${arg === 'bill' ? '<input type="hidden" name="then" value="bill">' : ''}
+        ${!isAdmin() ? `<div class="alert info">${icon('info', 'sm')}<span>Check Guest lookup first so the guest isn’t registered twice. The front office sees every guest you register.</span></div>` : ''}
+        <div class="form-grid">
           ${field('Guest name', 'guest_name', 'text', '', 'maxlength="200" placeholder="Full name"', 'wide')}
           ${field('Room number', 'room', 'text', '', 'maxlength="40" placeholder="e.g. 101"')}
           ${field('Property', 'property', 'text', '', 'maxlength="200" placeholder="e.g. Cozy Nest"')}
@@ -1601,6 +1602,7 @@
                     <div class="search">${icon('search', 'sm')}<input class="input" type="search" placeholder="Filter…" data-input="stayFilter" aria-label="Filter guests"></div>
                     <select id="guestSelect" name="stay_id" required aria-label="Guest and room"><option value="">Select guest and room</option>${stayOptions()}</select>
                   </div>
+                  <button type="button" class="link new-guest" data-act="form" data-arg="stay" data-arg2="bill">${icon('userPlus', 'sm')} New guest? Register them</button>
                 </div>
               </div>
             </section>
@@ -2012,6 +2014,8 @@
         values.reference = `${values.reference} · paid ${pc} ${amt.toFixed(2)} at ${fxText(payRate)}`.slice(0, 100);
       }
     }
+    let thenBill = false;
+    if (name === 'stays') { thenBill = values.then === 'bill'; delete values.then; }
     if (name === 'staff-rename') {
       const u = String(values.username || '').trim().toLowerCase();
       if (u === loginName(values.email)) { errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>Enter a different username.</span></div>`; return; }
@@ -2046,6 +2050,15 @@
       if (name === 'stay-delete') ui.selectedStay = null;
       await load();
       if (name === 'stay-delete') render();
+      if (name === 'stays' && thenBill) {
+        const guest = stays().filter((x) => x.status === 'active' && x.guest_name === values.guest_name.trim() && String(x.room) === values.room.trim()).pop();
+        openForm('bill');
+        const f = document.querySelector('#modal form');
+        const sel = document.getElementById('guestSelect');
+        if (guest && sel) { sel.value = guest.id; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+        if (f) { const bld = f.querySelector('[data-builder]'); if (bld) bbRecalc(bld); updateFxHint(f); updateBillSummary(f); }
+        return toast(`${values.guest_name.trim()} registered. Now add the bill.`);
+      }
       if (name === 'staff-create' || name === 'staff-reset' || name === 'staff-rename') {
         const username = name === 'staff-reset' ? loginName(values.email) : String(values.username).trim().toLowerCase();
         const lookup = name === 'staff-rename' ? username + '@' + usernameDomain : values.email;
@@ -2053,7 +2066,7 @@
         const access = m.role === 'cashier' ? 'Front office cashier' : m.role || m.outlet_id ? roleLabel(m) : '';
         return showCredentials({ username, password: name === 'staff-rename' ? '' : values.password, access, reset: name === 'staff-reset', renamed: name === 'staff-rename' ? loginName(values.email) : '' });
       }
-      toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'staff-rename': 'Username changed.', 'bill-update': 'Invoice updated.', 'bill-delete': 'Invoice deleted.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.', 'payment-update': 'Payment updated.', 'payment-void': 'Payment voided. The invoices are open again.', 'stay-delete': 'Folio deleted.' }[endpoint] || 'Saved to your workspace.');
+      toast(name === 'branding-save' && 'fx_usd_mvr' in values && !('legal_name' in values) ? 'Exchange rate saved.' : { settings: 'Settings saved.', 'staff-create': 'User created. Share the username and password with them.', 'staff-reset': 'Password updated.', 'staff-rename': 'Username changed.', stays: 'Guest registered. Every outlet can now bill this room.', 'bill-update': 'Invoice updated.', 'bill-delete': 'Invoice deleted.', 'branding-save': 'Branding saved. Folios and invoices now use it.', members: 'User added. They can now create their account.', 'payment-update': 'Payment updated.', 'payment-void': 'Payment voided. The invoices are open again.', 'stay-delete': 'Folio deleted.' }[endpoint] || 'Saved to your workspace.');
     } catch (err) {
       errBox.innerHTML = `<div class="alert error">${icon('alert', 'sm')}<span>${esc(err.message)}</span></div>`;
       btn.disabled = false;

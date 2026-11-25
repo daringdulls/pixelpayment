@@ -4,6 +4,7 @@
 --   pixel_payment_update, pixel_payment_void     edit / void a payment receipt
 --   pixel_stay_reopen, pixel_stay_delete         reopen / delete a guest folio
 --   pixel_member_rename                          move a staff login's role/outlet to its new username
+--   pixel_stay_create                            register a guest stay on behalf of outlet staff
 -- and the table public.pixel_staff_roles, which marks front-office cashiers.
 -- Browsers cannot call them: execute is revoked from anon and authenticated.
 -- Safe to run more than once.
@@ -14,7 +15,7 @@ declare
   need text[] := array[
     'bills.id','bills.number','bills.date','bills.due','bills.amount','bills.notes','bills.stay_id','bills.customer',
     'payments.id','payments.bill_id','payments.date','payments.method','payments.reference',
-    'stays.id','stays.status'];
+    'stays.id','stays.status','stays.guest_name','stays.room','stays.property','stays.arrival','stays.departure'];
   missing text[];
 begin
   select array_agg(n) into missing from unnest(need) n
@@ -142,6 +143,46 @@ begin
   perform public.pixel_log('Username changed', split_part(p_old, '@', 1) || ' → ' || split_part(p_new, '@', 1), p_actor);
 end $$;
 
+-- 6b. Guest registration for outlet staff. Sets the guest fields; any other required column of
+--     cozy_ledger.stays without a default (for example a workspace id) is copied from an existing stay,
+--     and a "created_by"-style column gets the actor. Returns the new stay's id as text.
+create or replace function public.pixel_stay_create(
+  p_guest_name text, p_room text, p_property text, p_arrival date, p_departure date, p_actor text)
+returns text language plpgsql security definer set search_path = '' as $$
+declare
+  cols text := 'guest_name, room, property, arrival, departure, status';
+  vals text := format('%L, %L, %L, %L, %L, %L', p_guest_name, p_room, p_property, p_arrival, p_departure, 'active');
+  c record; new_id text; has_template boolean;
+begin
+  if p_departure < p_arrival then raise exception 'Departure can''t be before arrival.'; end if;
+  select exists (select 1 from cozy_ledger.stays) into has_template;
+  for c in
+    select column_name, data_type from information_schema.columns
+    where table_schema = 'cozy_ledger' and table_name = 'stays'
+      and is_nullable = 'NO' and column_default is null and is_identity = 'NO' and is_generated = 'NEVER'
+      and column_name not in ('guest_name', 'room', 'property', 'arrival', 'departure', 'status')
+  loop
+    if c.column_name = 'id' then
+      cols := cols || ', id';
+      vals := vals || ', ' || case when c.data_type = 'uuid' then 'gen_random_uuid()' else 'gen_random_uuid()::text' end;
+    elsif c.column_name ~ '^(created_by|created_by_email|actor|user_email)$' then
+      cols := cols || ', ' || quote_ident(c.column_name);
+      vals := vals || ', ' || quote_literal(p_actor);
+    elsif c.column_name ~ '(^|_)(at|on|date|time)$' or c.data_type like 'timestamp%' then
+      cols := cols || ', ' || quote_ident(c.column_name);
+      vals := vals || ', now()';
+    elsif has_template then
+      cols := cols || ', ' || quote_ident(c.column_name);
+      vals := vals || format(', (select %I from cozy_ledger.stays limit 1)', c.column_name);
+    else
+      raise exception 'Register the first guest from a head office login; outlets can register guests after that.';
+    end if;
+  end loop;
+  execute format('insert into cozy_ledger.stays (%s) values (%s) returning id::text', cols, vals) into new_id;
+  perform public.pixel_log('Guest registered', p_guest_name || ' · Room ' || p_room, p_actor);
+  return new_id;
+end $$;
+
 -- 7. Only the server-side secret key may call these.
 do $$
 declare f text;
@@ -154,7 +195,8 @@ begin
     'pixel_payment_void(text[],text,text,text)',
     'pixel_stay_reopen(text,text)',
     'pixel_stay_delete(text,text)',
-    'pixel_member_rename(text,text,text)'] loop
+    'pixel_member_rename(text,text,text)',
+    'pixel_stay_create(text,text,text,date,date,text)'] loop
     execute format('revoke all on function public.%s from public, anon, authenticated', f);
     execute format('grant execute on function public.%s to service_role', f);
   end loop;

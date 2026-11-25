@@ -2,6 +2,7 @@ import {staff} from './_staff.js';
 import {rates} from './_rates.js';
 import {branding} from './_branding.js';
 import {bills} from './_bills.js';
+import {guests} from './_guests.js';
 import {CASHIER_BLOCKED,cashierEmails,jwtEmail} from './_roles.js';
 // The Vercel function relays only the signed-in caller's JWT to the isolated database API.
 export default async function handler(req,res){
@@ -17,6 +18,7 @@ export default async function handler(req,res){
  // Front-office cashiers are "admin" in the ledger but may not use head-office-only actions.
  if(CASHIER_BLOCKED.has(path)){let set;try{set=await cashierEmails(endpoint);}catch{return res.status(503).json({error:'Unable to verify your access. Please try again shortly.'});}
   if(set.has(jwtEmail(req.headers.authorization)))return res.status(403).json({error:'Cashiers can’t do this. Ask head office.'});}
+ if(path==='/api/stays'&&req.method==='POST')return guests(req,res,{endpoint,key});
  if(path==='/api/staff-create'||path==='/api/staff-reset'||path==='/api/staff-rename')return staff(req,res,path,{endpoint,key,domain});
  if(path==='/api/rates'||path==='/api/rates-save')return rates(req,res,path,{endpoint,key});
  if(path==='/api/branding'||path==='/api/branding-save')return branding(req,res,path,{endpoint,key});
